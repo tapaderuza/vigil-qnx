@@ -1,0 +1,4 @@
+# Host-side test dependencies (the QNX target needs none of these).
+pytest>=8
+# Independent AIS decoder used to cross-check ours; tests skip the check if absent.
+pyais>=2.9

@@ -1,0 +1,11 @@
+out/
+__pycache__/
+.pytest_cache/
+*.pyc
+# generated from web/index.html by tools/embed.py
+src/qnx/web_index.h
+# QNX SDK / image artefacts never belong in the repository
+qnx-vm/
+*.vmdk
+*.qcow2
+*.ifs
