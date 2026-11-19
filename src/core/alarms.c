@@ -26,6 +26,12 @@ const char *vg_src_name(int src)
     return (src >= 0 && src < VG_SRC_COUNT) ? nm[src] : "?";
 }
 
+const char *vg_obs_name(int i)
+{
+    static const char *const nm[VG_OBS_COUNT] = { "HR", "SpO2", "RR", "SBP", "TEMP", "ACVPU", "O2" };
+    return (i >= 0 && i < VG_OBS_COUNT) ? nm[i] : "?";
+}
+
 /* ----------------------------------------------------------------------- config */
 
 void vg_alarm_cfg_default(vg_alarm_cfg_t *c)
@@ -130,13 +136,14 @@ void vg_beds_apply(vg_beds_t *b, const vg_sample_t *s, uint64_t now_ms)
             bd->t_v[p] = now_ms;
         }
     }
+    /* Each observation has its own clock: one that keeps arriving must never vouch for the other. */
     if (s->acvpu != 0) {
         bd->acvpu = s->acvpu;
-        bd->t_ctx_ms = now_ms;
+        bd->t_acvpu_ms = now_ms;
     }
     if (s->o2 >= 0) {
         bd->o2 = s->o2;
-        bd->t_ctx_ms = now_ms;
+        bd->t_o2_ms = now_ms;
     }
 }
 
@@ -243,11 +250,22 @@ uint32_t vg_engine_step(vg_engine_t *e, const vg_beds_t *beds, uint64_t now_ms, 
             want[p] = v->valid[p] ? level_with_hysteresis(&c->lim[p], k_hyst[p], bd->v[p], e->st[i][p].level)
                                   : VG_LVL_NONE;
         }
+        /*
+         * Consciousness and oxygen are judged exactly like the vital signs: delivered, and not older
+         * than sensor_ms by their own clock. One that expired makes NEWS2 not calculable; once it was
+         * known it also counts as a sensor not delivering, so an active NEWS2 alarm cannot just vanish.
+         */
+        uint64_t aa = now_ms >= bd->t_acvpu_ms ? now_ms - bd->t_acvpu_ms : 0;
+        uint64_t oa = now_ms >= bd->t_o2_ms ? now_ms - bd->t_o2_ms : 0;
+        v->acvpu_valid = v->online && bd->acvpu != 0 && aa <= c->sensor_ms;
+        v->o2_valid = v->online && bd->o2 >= 0 && oa <= c->sensor_ms;
+        if (v->online && bd->acvpu != 0 && !v->acvpu_valid) v->stale_mask |= (uint8_t)(1u << VG_OBS_ACVPU);
+        if (v->online && bd->o2 >= 0 && !v->o2_valid) v->stale_mask |= (uint8_t)(1u << VG_OBS_O2);
+
         want[VG_SRC_SENSOR] = v->stale_mask ? VG_LVL_MEDIUM : VG_LVL_NONE;
         want[VG_SRC_OFFLINE] = v->online ? VG_LVL_NONE : VG_LVL_MEDIUM;
 
-        uint64_t ca = now_ms >= bd->t_ctx_ms ? now_ms - bd->t_ctx_ms : 0;
-        if (v->online && all_valid && ca <= c->sensor_ms) {
+        if (v->online && all_valid && v->acvpu_valid && v->o2_valid) {
             uint8_t has[VG_PARAM_COUNT] = { 1, 1, 1, 1, 1 };
             vg_news2_compute(bd->v, has, bd->acvpu, bd->o2, &v->news2);
             if (v->news2.valid) {
@@ -408,10 +426,11 @@ size_t vg_render_alarms(const vg_picture_t *p, const vg_alarm_cfg_t *c, char *bu
                     sb_printf(&sb, "NEWS2 %d (%s): clinical review\n", v->news2.total, vg_news2_band(&v->news2));
                 } else if (s == VG_SRC_SENSOR) {
                     sb_printf(&sb, "TECHNICAL sensor not delivering:");
-                    for (int q = 0; q < VG_PARAM_COUNT; q++) {
-                        if (v->stale_mask & (1u << q)) sb_printf(&sb, " %s", vg_param_name(q));
+                    for (int q = 0; q < VG_OBS_COUNT; q++) {
+                        if (v->stale_mask & (1u << q)) sb_printf(&sb, " %s", vg_obs_name(q));
                     }
-                    sb_printf(&sb, " (values not judged)\n");
+                    sb_printf(&sb, " (values not judged%s)\n",
+                              (v->stale_mask >> VG_OBS_ACVPU) ? "; NEWS2 not calculable" : "");
                 } else {
                     sb_printf(&sb, "TECHNICAL no data from this bed for %u s\n", v->age_ms / 1000u);
                 }
@@ -498,11 +517,19 @@ size_t vg_render_json(const vg_picture_t *p, const vg_alarm_cfg_t *c, char *buf,
         jnum(&sb, v, VG_HR, 0); sb_printf(&sb, ",\"spo2\":"); jnum(&sb, v, VG_SPO2, 0);
         sb_printf(&sb, ",\"rr\":"); jnum(&sb, v, VG_RR, 0); sb_printf(&sb, ",\"sbp\":"); jnum(&sb, v, VG_SBP, 0);
         sb_printf(&sb, ",\"temp\":"); jnum(&sb, v, VG_TEMP, 1);
-        sb_printf(&sb, ",\"acvpu\":\"%c\",\"o2\":%d,", v->acvpu ? v->acvpu : '-', v->o2 < 0 ? 0 : v->o2);
+        /* Consciousness and oxygen follow the same rule as the vital signs: expired or never delivered is null. */
+        if (v->acvpu_valid) sb_printf(&sb, ",\"acvpu\":\"%c\"", v->acvpu); else sb_printf(&sb, ",\"acvpu\":null");
+        if (v->o2_valid) sb_printf(&sb, ",\"o2\":%d,", v->o2); else sb_printf(&sb, ",\"o2\":null,");
         if (v->news2.valid) {
-            sb_printf(&sb, "\"news2\":{\"total\":%d,\"band\":\"%s\"},", v->news2.total, vg_news2_band(&v->news2));
+            sb_printf(&sb, "\"news2\":{\"total\":%d,\"band\":\"%s\"},\"news2_missing\":[],", v->news2.total, vg_news2_band(&v->news2));
         } else {
-            sb_printf(&sb, "\"news2\":null,");
+            sb_printf(&sb, "\"news2\":null,\"news2_missing\":[");
+            int fm = 1;
+            for (int q = 0; q < VG_OBS_COUNT; q++) {
+                int ok = q < VG_PARAM_COUNT ? v->valid[q] : (q == VG_OBS_ACVPU ? v->acvpu_valid : v->o2_valid);
+                if (!ok) { sb_printf(&sb, "%s\"%s\"", fm ? "" : ",", vg_obs_name(q)); fm = 0; }
+            }
+            sb_printf(&sb, "],");
         }
         sb_printf(&sb, "\"alarms\":[");
         int f2 = 1;
@@ -514,8 +541,8 @@ size_t vg_render_json(const vg_picture_t *p, const vg_alarm_cfg_t *c, char *buf,
         }
         sb_printf(&sb, "],\"stale\":[");
         f2 = 1;
-        for (int q = 0; q < VG_PARAM_COUNT; q++) {
-            if (v->stale_mask & (1u << q)) { sb_printf(&sb, "%s\"%s\"", f2 ? "" : ",", vg_param_name(q)); f2 = 0; }
+        for (int q = 0; q < VG_OBS_COUNT; q++) {
+            if (v->stale_mask & (1u << q)) { sb_printf(&sb, "%s\"%s\"", f2 ? "" : ",", vg_obs_name(q)); f2 = 0; }
         }
         sb_printf(&sb, "]}");
     }

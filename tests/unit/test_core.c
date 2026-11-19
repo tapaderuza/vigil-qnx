@@ -236,6 +236,100 @@ static void test_never_reported_parameter_is_not_a_fault(void)
     CHECK(n == 0 && g_pic.bed[1].stale_mask == 0 && !g_pic.bed[1].news2.valid);
 }
 
+/*
+ * Consciousness (ACVPU) and supplemental oxygen age on their own clocks. Before this was fixed they
+ * shared one timestamp, so whichever kept arriving made the other one's old value look current and
+ * NEWS2 was reported as valid on data that had expired: NEWS2 3 with ACVPU 'C' from eight seconds
+ * ago, NEWS2 2 with oxygen from eight seconds ago.
+ */
+static void test_acvpu_expires_even_while_oxygen_keeps_arriving(void)
+{
+    setup();
+    vg_transition_t tr[64];
+    feed("1,72,98,14,122,36.8,C,0", 0);                      /* one complete frame: NEWS2 = 3 (confusion) */
+    run("1,72,98,14,122,36.8,,0", 100, 4000, tr, 64);        /* then valid frames that omit only ACVPU */
+    CHECK(g_pic.bed[0].news2.valid && g_pic.bed[0].news2.total == 3);    /* 4 s old: still inside the 5 s limit */
+    run("1,72,98,14,122,36.8,,0", 4100, 8000, tr, 64);
+    CHECK(!g_pic.bed[0].news2.valid);                        /* 8 s old: not calculable, not 3 */
+    CHECK(g_pic.bed[0].valid[VG_HR] && g_pic.bed[0].valid[VG_SPO2]);     /* the vital signs are still judged */
+    CHECK(!g_pic.bed[0].acvpu_valid && g_pic.bed[0].o2_valid);           /* only consciousness expired */
+    CHECK(g_pic.bed[0].stale_mask == (1u << VG_OBS_ACVPU));
+    CHECK(g_pic.bed[0].src_level[VG_SRC_SENSOR] == VG_LVL_MEDIUM);       /* a known observation went silent: told, not hidden */
+
+    char buf[2048];
+    vg_render_beds(&g_pic, buf, sizeof(buf));
+    CHECK(strstr(buf, "N/A") != NULL);                                   /* text view: not scored */
+    vg_render_alarms(&g_pic, &g_eng.cfg, buf, sizeof(buf));
+    CHECK(strstr(buf, "sensor not delivering: ACVPU") != NULL && strstr(buf, "NEWS2 not calculable") != NULL);
+    static char js[16384];
+    vg_render_json(&g_pic, &g_eng.cfg, js, sizeof(js));
+    CHECK(strstr(js, "\"news2\":null") != NULL && strstr(js, "\"acvpu\":null") != NULL && strstr(js, "\"o2\":0") != NULL);
+    CHECK(strstr(js, "\"news2_missing\":[\"ACVPU\"]") != NULL && strstr(js, "\"stale\":[\"ACVPU\"]") != NULL);
+
+    /* It comes back: the next frame that carries it makes NEWS2 calculable again at once. */
+    feed("1,72,98,14,122,36.8,C,0", 8100);
+    run(NULL, 8100, 8200, tr, 64);
+    CHECK(g_pic.bed[0].news2.valid && g_pic.bed[0].news2.total == 3 && g_pic.bed[0].stale_mask == 0);
+    CHECK(g_pic.bed[0].src_level[VG_SRC_SENSOR] == VG_LVL_NONE);
+}
+
+static void test_context_expiry_boundary_is_the_sensor_limit(void)
+{
+    setup();
+    vg_transition_t tr[64];
+    feed("1,72,98,14,122,36.8,C,1", 0);
+    run("1,72,98,14,122,36.8,,", 100, 5000, tr, 64);         /* the other vitals keep arriving every second */
+    CHECK(g_pic.bed[0].acvpu_valid && g_pic.bed[0].o2_valid && g_pic.bed[0].news2.valid);   /* exactly 5000 ms old: valid */
+    run("1,72,98,14,122,36.8,,", 5100, 5100, tr, 64);
+    CHECK(!g_pic.bed[0].acvpu_valid && !g_pic.bed[0].o2_valid && !g_pic.bed[0].news2.valid);   /* 5100 ms: expired */
+}
+
+static void test_other_alarms_survive_when_news2_is_not_calculable(void)
+{
+    setup();
+    vg_transition_t tr[64];
+    feed("1,150,98,14,122,36.8,A,0", 0);                    /* heart rate 150: HIGH on its own */
+    run("1,150,98,14,122,36.8,,", 100, 9000, tr, 64);        /* consciousness and oxygen both stop */
+    CHECK(!g_pic.bed[0].news2.valid);
+    CHECK(g_pic.bed[0].src_level[VG_HR] == VG_LVL_HIGH);     /* the independent alarm is still evaluated */
+    CHECK(g_pic.bed[0].level == VG_LVL_HIGH && g_pic.n_high == 1);
+    CHECK(g_pic.bed[0].stale_mask == ((1u << VG_OBS_ACVPU) | (1u << VG_OBS_O2)));
+}
+
+static void test_active_news2_alarm_is_replaced_by_a_technical_alarm_not_silence(void)
+{
+    setup();
+    vg_transition_t tr[64];
+    feed("1,115,94,22,125,37.0,A,0", 0);                    /* the score is 5: MEDIUM */
+    run("1,115,94,22,125,37.0,A,0", 100, 4500, tr, 64);
+    CHECK(g_pic.bed[0].src_level[VG_SRC_NEWS2] == VG_LVL_MEDIUM);
+    run("1,115,94,22,125,37.0,,0", 4600, 12000, tr, 64);     /* consciousness stops arriving */
+    CHECK(!g_pic.bed[0].news2.valid && g_pic.bed[0].src_level[VG_SRC_NEWS2] == VG_LVL_NONE);
+    CHECK(g_pic.bed[0].src_level[VG_SRC_SENSOR] == VG_LVL_MEDIUM && g_pic.bed[0].level == VG_LVL_MEDIUM && g_pic.bed[0].audible);
+}
+
+static void test_oxygen_expires_even_while_acvpu_keeps_arriving(void)
+{
+    setup();
+    vg_transition_t tr[64];
+    feed("1,72,98,14,122,36.8,A,1", 0);                      /* on supplemental oxygen: NEWS2 = 2 */
+    run("1,72,98,14,122,36.8,A,", 100, 4000, tr, 64);        /* then valid frames that omit only the oxygen flag */
+    CHECK(g_pic.bed[0].news2.valid && g_pic.bed[0].news2.total == 2);
+    run("1,72,98,14,122,36.8,A,", 4100, 8000, tr, 64);
+    CHECK(!g_pic.bed[0].news2.valid);
+    CHECK(g_pic.bed[0].acvpu_valid && !g_pic.bed[0].o2_valid);           /* only the oxygen flag expired */
+    CHECK(g_pic.bed[0].stale_mask == (1u << VG_OBS_O2));
+
+    static char js[16384];
+    vg_render_json(&g_pic, &g_eng.cfg, js, sizeof(js));
+    CHECK(strstr(js, "\"news2\":null") != NULL && strstr(js, "\"o2\":null") != NULL);
+    CHECK(strstr(js, "\"news2_missing\":[\"O2\"]") != NULL);
+
+    feed("1,72,98,14,122,36.8,A,1", 8100);                  /* the flag comes back */
+    run(NULL, 8100, 8200, tr, 64);
+    CHECK(g_pic.bed[0].news2.valid && g_pic.bed[0].news2.total == 2);
+}
+
 static void test_offline_bed(void)
 {
     setup();
@@ -373,6 +467,11 @@ int main(void)
     RUN(test_priorities);
     RUN(test_sensor_off_is_a_technical_alarm_not_a_stale_number);
     RUN(test_never_reported_parameter_is_not_a_fault);
+    RUN(test_acvpu_expires_even_while_oxygen_keeps_arriving);
+    RUN(test_oxygen_expires_even_while_acvpu_keeps_arriving);
+    RUN(test_context_expiry_boundary_is_the_sensor_limit);
+    RUN(test_other_alarms_survive_when_news2_is_not_calculable);
+    RUN(test_active_news2_alarm_is_replaced_by_a_technical_alarm_not_silence);
     RUN(test_offline_bed);
     RUN(test_news2_raises_alarm_even_when_each_value_is_inside_limits);
     RUN(test_audio_pause_never_hides_the_alarm);

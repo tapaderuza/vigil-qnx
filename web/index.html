@@ -246,7 +246,7 @@ function render(lv) {
       row.append(v);
     }
     const n = b.news2, sc = el("div", "score " + (n && !historic ? ({ HIGH: "high", MEDIUM: "medium", "LOW-MEDIUM": "low" }[n.band] || "") : ""));
-    sc.append(el("div", "k", "NEWS2"), el("div", "x", n ? String(n.total) : "—"), el("div", "b", historic ? "HISTORIC" : n ? n.band : "NOT SCORED"));
+    sc.append(el("div", "k", "NEWS2"), el("div", "x", n ? String(n.total) : "—"), el("div", "b", historic ? "HISTORIC" : n ? n.band : "NOT SCORED" + (b.news2_missing && b.news2_missing.length ? ": " + b.news2_missing.join(" ") : "")));
     row.append(sc); box.append(row);
   }
 

@@ -28,6 +28,13 @@ const char *vg_level_name(vg_level_t l);
 enum { VG_SRC_NEWS2 = VG_PARAM_COUNT, VG_SRC_SENSOR, VG_SRC_OFFLINE, VG_SRC_COUNT };
 const char *vg_src_name(int src);
 
+/*
+ * The two observations NEWS2 needs besides the five vital signs. They are tracked like parameters
+ * (their own delivery time, their own expiry) and share the bit positions of stale_mask after them.
+ */
+enum { VG_OBS_ACVPU = VG_PARAM_COUNT, VG_OBS_O2, VG_OBS_COUNT };
+const char *vg_obs_name(int i);   /* names for stale_mask bits 0..VG_OBS_COUNT-1: HR SpO2 RR SBP TEMP ACVPU O2 */
+
 /* ------------------------------------------------------------------- configuration */
 
 typedef struct {
@@ -60,7 +67,8 @@ typedef struct {
     uint64_t t_v[VG_PARAM_COUNT];
     char     acvpu;
     int8_t   o2;
-    uint64_t t_ctx_ms;           /* when acvpu/o2 were last delivered */
+    uint64_t t_acvpu_ms;         /* when consciousness was last delivered; its own clock */
+    uint64_t t_o2_ms;            /* when the oxygen flag was last delivered; its own clock */
     uint32_t frames;
 } vg_bed_t;
 
@@ -89,11 +97,12 @@ typedef struct {
     uint32_t   age_ms;
     uint8_t    valid[VG_PARAM_COUNT];
     double     v[VG_PARAM_COUNT];
-    char       acvpu;
-    int8_t     o2;
-    vg_news2_t news2;
+    char       acvpu;       /* last delivered value; use acvpu_valid before trusting it */
+    int8_t     o2;          /* last delivered value; use o2_valid before trusting it */
+    uint8_t    acvpu_valid, o2_valid;   /* delivered, and not older than sensor_ms */
+    vg_news2_t news2;       /* news2.valid is 0 unless all five vitals, ACVPU and O2 are valid */
     vg_level_t src_level[VG_SRC_COUNT];
-    uint8_t    stale_mask;  /* parameters that were known but are no longer delivered */
+    uint8_t    stale_mask;  /* parameters and observations (bit VG_OBS_*) that were known but are no longer delivered */
     vg_level_t level;       /* highest of the sources */
     uint8_t    audible;     /* level > 0 and audio not paused */
 } vg_bed_view_t;
