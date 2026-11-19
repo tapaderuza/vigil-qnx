@@ -72,6 +72,14 @@
   @keyframes alert { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
   .v .x { transition: color .4s ease; }
   .alarm.high .t { color: var(--red); }
+  /* Freshness: when vigild stops delivering, nothing on screen may pass for live. */
+  #conn.bad { font-size: 13px; color: var(--red); border-left: 2px solid var(--red); padding: 6px 12px; margin: 14px 0 0; letter-spacing: .04em; }
+  #live.off { animation: none; background: var(--faint); }
+  #word.historic { color: var(--dim); text-shadow: none; }
+  main.historic .bed, main.historic .alarm, main.historic #health { opacity: .4; }
+  main.historic .score .x, main.historic .v .x { color: var(--dim); }
+  main.historic .bed.high::before, main.historic .bed.medium::before { animation: none; background: var(--faint); }
+  main.historic .bed.medium, main.historic .bed.high { background: none; }
   @media (prefers-reduced-motion: reduce) { #live, #beat path, .bed.high::before { animation: none; } #beat path { stroke-dashoffset: 0; } }
   @media (max-width: 900px) { main { padding: 22px 18px; } .bed { grid-template-columns: repeat(3, 1fr); } .id { grid-column: 1 / -1; display: flex; gap: 14px; align-items: baseline; } .score { text-align: left; } }
 </style>
@@ -107,6 +115,73 @@ const cls = (l) => (l || "none").toLowerCase();
 const fmt = (v, d) => (v === null || v === undefined ? "—" : v.toFixed(d));
 function el(tag, c, text) { const e = document.createElement(tag); if (c) e.className = c; if (text !== undefined) e.textContent = text; return e; }
 
+/* FRESHNESS:BEGIN  pure logic, no DOM: unit-tested by tests/web/freshness.test.js (node --test) */
+/*
+ * What "live" means. A picture is live only while fresh samples keep arriving. A sample is fresh when
+ * vigild's own cycle counter (seq) or clock (t_ms) moved since the previous one, so a server that keeps
+ * answering with a frozen picture is stale just like a server that does not answer. A request that gets
+ * no answer within timeoutMs is abandoned. After staleMs without a fresh sample the panel stops claiming
+ * "live": values become historic and show when the last valid update arrived. A restarted daemon
+ * starts its counters again; that is a fresh sample, so the live state returns by itself.
+ */
+const FRESH = { pollMs: 500, timeoutMs: 2000, staleMs: 3000 };
+
+function newPanel(cfg) {
+  return { cfg: Object.assign({}, FRESH, cfg), pic: null, last: null, lastOkAt: null, lastOkWall: null,
+           lastError: "", errors: 0, restarts: 0 };
+}
+
+function acceptSample(st, p, now, wall) {
+  if (!p || typeof p.seq !== "number" || typeof p.t_ms !== "number" || !Array.isArray(p.beds)) return { fresh: false, reason: "malformed" };
+  if (st.last && p.seq === st.last.seq && p.t_ms === st.last.t_ms) return { fresh: false, reason: "frozen" };
+  const restarted = !!st.last && (p.seq < st.last.seq || p.t_ms < st.last.t_ms);
+  st.last = { seq: p.seq, t_ms: p.t_ms };
+  st.pic = p; st.lastOkAt = now; st.lastOkWall = wall; st.lastError = "";
+  if (restarted) st.restarts++;
+  return { fresh: true, restarted };
+}
+
+function liveness(st, now) {
+  if (st.lastOkAt === null) return { state: "connecting", ageMs: null };
+  const age = now - st.lastOkAt;
+  return { state: age <= st.cfg.staleMs ? "live" : "stale", ageMs: age };
+}
+
+function failure(st, text) { st.errors++; st.lastError = text; return { fresh: false, reason: "error" }; }
+
+async function pollOnce(st, env) {
+  const ctl = new env.AbortController();
+  let timer;
+  const deadline = new Promise((_, reject) => { timer = env.setTimeout(() => { ctl.abort(); reject(new Error("timeout")); }, st.cfg.timeoutMs); });
+  try {
+    const body = (async () => {
+      const r = await env.fetch("/api/picture", { cache: "no-store", signal: ctl.signal });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })();
+    body.catch(() => {}); // a late rejection after the timeout must not surface
+    const p = await Promise.race([body, deadline]);
+    const res = acceptSample(st, p, env.now(), env.wall());
+    if (!res.fresh) st.lastError = res.reason === "frozen" ? "daemon answers with the same sequence" : "malformed picture";
+    return res;
+  } catch (e) {
+    return failure(st, e && e.message === "timeout" ? "no answer within " + st.cfg.timeoutMs / 1000 + " s" : String((e && e.message) || e));
+  } finally { env.clearTimeout(timer); }
+}
+/* FRESHNESS:END */
+
+const panel = newPanel({ staleMs: +(q.get("stale_ms") || FRESH.staleMs), timeoutMs: +(q.get("timeout_ms") || FRESH.timeoutMs) });
+const clock = (w) => new Date(w).toLocaleTimeString([], { hour12: false });
+
+function ingest(p, restarted) {
+  if (restarted) for (const k of Object.keys(hist)) delete hist[k];
+  pic = p;
+  for (const b of p.beds) for (const [k] of PARAMS) {
+    const h = (hist[b.bed + ":" + k] = hist[b.bed + ":" + k] || []);
+    h.push(b[k] === undefined ? null : b[k]); if (h.length > 90) h.shift();
+  }
+}
+
 function spark(key, minSpan) {
   const NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg");
   svg.setAttribute("class", "sp"); svg.setAttribute("viewBox", "0 0 100 22"); svg.setAttribute("preserveAspectRatio", "none");
@@ -127,36 +202,51 @@ function alarmText(b, a) {
   return ["No data from this bed", Math.round(b.age_ms / 1000) + " s of silence"];
 }
 
-function render() {
+// lv: {state: "live" | "stale" | "connecting"}; a replay is always "live" (it is not a connection).
+function render(lv) {
+  const main = document.querySelector("main"), historic = lv.state === "stale";
+  main.classList.toggle("historic", historic);
+  document.title = historic ? "Vigil — NO LIVE DATA" : "Vigil";
+  const conn = $("conn");
+  if (source === "live" && lv.state !== "live") {
+    const when = panel.lastOkWall === null ? "" : "last valid update " + clock(panel.lastOkWall) + " (" + Math.round(lv.ageMs / 1000) + " s ago)";
+    conn.className = "bad";
+    conn.textContent = lv.state === "connecting" ? "CONNECTING TO VIGILD… " + (panel.lastError ? "(" + panel.lastError + ")" : "")
+      : "NO LIVE DATA · the values below are historic · " + when + (panel.lastError ? " · " + panel.lastError : "");
+  } else { conn.className = ""; conn.textContent = ""; }
   if (!pic) return;
+
   const w = $("word"), top = pic.highest;
-  w.className = top === "NONE" ? "clear" : cls(top);
-  w.textContent = top === "NONE" ? "Stable" : top === "HIGH" ? "Urgent" : top === "MEDIUM" ? "Attention" : "Aware";
+  const unscored = pic.beds.some((b) => b.online && !b.news2);
+  w.className = historic ? "historic" : top === "NONE" ? (unscored ? "low" : "clear") : cls(top);
+  w.textContent = historic ? "No live data" : top === "NONE" ? (unscored ? "No alarms" : "Stable") : top === "HIGH" ? "Urgent" : top === "MEDIUM" ? "Attention" : "Aware";
   const parts = [];
   if (pic.n_high) parts.push(pic.n_high + " high");
   if (pic.n_medium) parts.push(pic.n_medium + " medium");
   if (pic.n_low) parts.push(pic.n_low + " low");
-  $("summary").replaceChildren(document.createTextNode(parts.length ? parts.join("  ·  ") : "no active alarms"), el("br"), Object.assign(el("i"), { id: "live" }), document.createTextNode(source));
-  if (pic.audio.paused) { const a = el("div", "", "audio paused " + pic.audio.remaining_s + " s (visual alarms unaffected)"); a.id = "audio"; $("summary").append(a); }
+  const dot = el("i"); dot.id = "live"; if (historic) dot.className = "off";
+  const tag = source === "replay" ? "replay" : historic ? "historic · last update " + (panel.lastOkWall === null ? "—" : clock(panel.lastOkWall)) : source;
+  $("summary").replaceChildren(document.createTextNode((historic ? "last known: " : "") + (parts.length ? parts.join("  ·  ") : "no active alarms") + (!historic && unscored ? "  ·  some beds not scored" : "")),
+    el("br"), dot, document.createTextNode(tag));
+  if (pic.audio.paused && !historic) { const a = el("div", "", "audio paused " + pic.audio.remaining_s + " s (visual alarms unaffected)"); a.id = "audio"; $("summary").append(a); }
 
   const box = $("beds"); box.replaceChildren();
   for (const b of pic.beds) {
     const lvl = cls(b.level), row = el("div", "bed " + (b.online ? lvl : "offline"));
     const id = el("div", "id"); id.append(el("div", "n", String(b.bed).padStart(2, "0")),
-      el("div", "s", !b.online ? "NO DATA" : b.level === "NONE" ? "STABLE" : b.level + (b.audible ? " ♪" : "")));
+      el("div", "s", historic ? "HISTORIC" : !b.online ? "NO DATA" : b.level === "NONE" ? (b.news2 ? "STABLE" : "NOT SCORED") : b.level + (b.audible ? " ♪" : "")));
     row.append(id);
     for (const [k, lab, unit, d, minSpan] of PARAMS) {
-      const key = b.bed + ":" + k, h = (hist[key] = hist[key] || []);
-      h.push(b[k] === undefined ? null : b[k]); if (h.length > 90) h.shift();
+      const key = b.bed + ":" + k;
       const stale = (b.stale || []).includes(lab), alarm = (b.alarms || []).find((a) => a.src === lab);
       const v = el("div", "v " + (stale || !b.online ? "stale" : cls(alarm && alarm.level)));
       v.append(el("div", "k", lab));
       const x = el("div", "x", fmt(b[k], d)); if (b[k] !== null && b.online) x.append(el("small", "", unit)); v.append(x);
-      v.append(el("div", "why", stale ? "sensor off" : ""), spark(key, minSpan));
+      v.append(el("div", "why", historic ? "historic" : stale ? "sensor off" : ""), spark(key, minSpan));
       row.append(v);
     }
-    const n = b.news2, sc = el("div", "score " + (n ? ({ HIGH: "high", MEDIUM: "medium", "LOW-MEDIUM": "low" }[n.band] || "") : ""));
-    sc.append(el("div", "k", "NEWS2"), el("div", "x", n ? String(n.total) : "—"), el("div", "b", n ? n.band : "NOT SCORED"));
+    const n = b.news2, sc = el("div", "score " + (n && !historic ? ({ HIGH: "high", MEDIUM: "medium", "LOW-MEDIUM": "low" }[n.band] || "") : ""));
+    sc.append(el("div", "k", "NEWS2"), el("div", "x", n ? String(n.total) : "—"), el("div", "b", historic ? "HISTORIC" : n ? n.band : "NOT SCORED"));
     row.append(sc); box.append(row);
   }
 
@@ -164,7 +254,8 @@ function render() {
   const order = { HIGH: 3, MEDIUM: 2, LOW: 1 }, rows = [];
   for (const b of pic.beds) for (const a of b.alarms || []) rows.push([b, a]);
   rows.sort((x, y) => order[y[1].level] - order[x[1].level] || x[0].bed - y[0].bed);
-  if (!rows.length) al.append(el("div", "none", "Nothing needs attention."));
+  if (historic) al.append(el("div", "none", rows.length ? "Last known alarms, not current:" : "No alarms were active at the last valid update."));
+  else if (!rows.length) al.append(el("div", "none", "Nothing needs attention."));
   for (const [b, a] of rows) {
     const [t, d] = alarmText(b, a), r = el("div", "alarm " + cls(a.level));
     r.append(el("div", "p", a.level), el("div", "t", "Bed " + b.bed + " — " + t)); if (d) r.append(el("div", "d", d)); al.append(r);
@@ -178,23 +269,26 @@ function render() {
   }
 }
 
-function show(p) { pic = p; $("conn").textContent = ""; render(); }
+const liveNow = () => (source === "live" ? liveness(panel, performance.now()) : { state: "live", ageMs: 0 });
 async function poll() {
-  try { const r = await fetch("/api/picture", { cache: "no-store" }); if (!r.ok) throw new Error("HTTP " + r.status); source = "live"; show(await r.json()); }
-  catch (e) { $("conn").textContent = "VIGILD NOT REACHABLE"; }
-  setTimeout(poll, 500);
+  const res = await pollOnce(panel, { fetch: (u, o) => fetch(u, o), AbortController, setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (t) => clearTimeout(t),
+                                      now: () => performance.now(), wall: () => Date.now() });
+  source = "live";
+  if (res.fresh) ingest(panel.pic, res.restarted);
+  render(liveNow());
+  setTimeout(poll, panel.cfg.pollMs);
 }
 async function replay(url) {
   const speed = +(q.get("speed") || 1);
   const frames = (await (await fetch(url)).text()).split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l));
   if (!frames.length) return;
   source = "replay";
-  const fixed = q.get("frame");
+  const fixed = q.get("frame"), show = (p) => { ingest(p, false); render({ state: "live", ageMs: 0 }); };
   if (fixed !== null) { const n = Math.min(frames.length - 1, Math.max(0, +fixed)); for (let i = Math.max(0, n - 60); i <= n; i++) show(frames[i]); return; }
   let i = 0; const tick = () => { show(frames[i]); i = (i + 1) % frames.length; setTimeout(tick, 250 / speed); }; tick();
 }
 const src = q.get("src");
-if (src) replay(src); else poll();
+if (src) replay(src); else { source = "live"; render(liveNow()); setInterval(() => render(liveNow()), 500); poll(); }
 </script>
 </body>
 </html>

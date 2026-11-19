@@ -36,7 +36,7 @@ QNX_LIBS  := -lsocket -lm -lslog2
 HOST_BINS := $(HOST_OUT)/test_core $(HOST_OUT)/vg-replay
 QNX_BINS  := $(QNX_OUT)/vigild $(QNX_OUT)/vigil-watch $(QNX_OUT)/vigil-ctl $(QNX_OUT)/test_core $(QNX_OUT)/vg-replay
 
-.PHONY: all host test test-unit test-sim qnx check-qnx-syntax clean
+.PHONY: all host test test-unit test-sim test-web qnx check-qnx-syntax clean
 all: host
 host: $(HOST_BINS)
 
@@ -49,11 +49,15 @@ $(HOST_OUT)/test_core: tests/unit/test_core.c $(CORE_SRC) $(CORE_HDR) | $(HOST_O
 $(HOST_OUT)/vg-replay: tools/vg_replay.c $(CORE_SRC) $(CORE_HDR) | $(HOST_OUT)
 	$(HOST_CC) $(HOST_CFLAGS) -o $@ tools/vg_replay.c $(CORE_SRC) -lm
 
-test: test-unit test-sim
+test: test-unit test-sim test-web
 test-unit: $(HOST_OUT)/test_core
 	$(HOST_OUT)/test_core
 test-sim: $(HOST_OUT)/vg-replay
 	python3 -m pytest -q sim
+# Dashboard freshness logic (needs Node 18+). Without Node the step says so loudly instead of passing silently.
+test-web:
+	@if command -v node >/dev/null 2>&1; then node --test tests/web/freshness.test.js; \
+	else echo "test-web: SKIPPED, node not found (install Node 18+ to run the dashboard tests)"; fi
 
 # The dashboard is embedded in vigild so the target needs no filesystem assets.
 src/qnx/web_index.h: web/index.html tools/embed.py
