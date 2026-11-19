@@ -250,6 +250,7 @@ static void handle_config(rcvid_t rcvid, const vg_msg_config_t *m)
         char err[96];
         if (vg_alarm_cfg_apply(&g_engine.cfg, line, err, sizeof(err)) == 0) {
             vgd_log(SLOG2_INFO, "config: %s", line);
+            publish(); /* readers of /dev/vigil/config must see the new limit at once, not on the next tick */
             reply_text(rcvid, 0, "ok\n");
         } else {
             vgd_log(SLOG2_WARNING, "config rejected (%s): %s", line, err);
