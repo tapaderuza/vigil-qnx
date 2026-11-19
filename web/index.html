@@ -56,13 +56,31 @@
   .health b { display: block; font: 400 17px var(--mono); } .health span { font: 10px var(--mono); color: var(--dim); letter-spacing: .14em; text-transform: uppercase; }
   .foot { margin-top: 30px; font: 11px var(--mono); color: var(--dim); letter-spacing: .06em; }
   #conn { font: 11px var(--mono); color: var(--amber); letter-spacing: .08em; }
+  /* Detail: numerals that do not jitter, a breathing "live" dot, a heartbeat hairline, a warm glow on the verdict. */
+  .v .x, .score .x, .id .n, .health b { font-variant-numeric: tabular-nums; }
+  #word { text-shadow: 0 0 38px color-mix(in srgb, currentColor 26%, transparent); transition: color .6s ease; }
+  #live { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--calm); margin-right: 8px; vertical-align: 1px; animation: breathe 2.4s ease-in-out infinite; }
+  @keyframes breathe { 0%, 100% { opacity: .25; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+  #beat { display: block; width: 168px; height: 22px; margin: 14px 0 0; overflow: visible; }
+  #beat path { fill: none; stroke: var(--dim); stroke-width: 1; stroke-linecap: round; stroke-dasharray: 220; stroke-dashoffset: 220; animation: trace 3.2s linear infinite; opacity: .7; }
+  @keyframes trace { 0% { stroke-dashoffset: 220; } 60%, 100% { stroke-dashoffset: 0; } }
+  .bed { position: relative; transition: background .5s ease; }
+  .bed.medium { background: linear-gradient(90deg, color-mix(in srgb, var(--amber) 7%, transparent), transparent 40%); }
+  .bed.high { background: linear-gradient(90deg, color-mix(in srgb, var(--red) 11%, transparent), transparent 45%); }
+  .bed.high::before, .bed.medium::before { content: ""; position: absolute; left: -14px; top: 14px; bottom: 12px; width: 2px; border-radius: 2px; background: var(--amber); }
+  .bed.high::before { background: var(--red); animation: alert 1.2s ease-in-out infinite; }
+  @keyframes alert { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+  .v .x { transition: color .4s ease; }
+  .alarm.high .t { color: var(--red); }
+  @media (prefers-reduced-motion: reduce) { #live, #beat path, .bed.high::before { animation: none; } #beat path { stroke-dashoffset: 0; } }
   @media (max-width: 900px) { main { padding: 22px 18px; } .bed { grid-template-columns: repeat(3, 1fr); } .id { grid-column: 1 / -1; display: flex; gap: 14px; align-items: baseline; } .score { text-align: left; } }
 </style>
 </head>
 <body>
 <main>
   <header>
-    <div><div class="mark">VI<b>GIL</b></div><div id="word" class="clear">&nbsp;</div></div>
+    <div><div class="mark">VI<b>GIL</b></div><div id="word" class="clear">&nbsp;</div>
+      <svg id="beat" viewBox="0 0 168 22" aria-hidden="true"><path d="M0 12 H48 L54 12 L58 4 L63 19 L68 8 L72 12 H110 L115 12 L118 7 L122 14 L126 12 H168"/></svg></div>
     <div id="summary"></div>
   </header>
   <div id="conn"></div>
@@ -118,7 +136,7 @@ function render() {
   if (pic.n_high) parts.push(pic.n_high + " high");
   if (pic.n_medium) parts.push(pic.n_medium + " medium");
   if (pic.n_low) parts.push(pic.n_low + " low");
-  $("summary").replaceChildren(document.createTextNode(parts.length ? parts.join("  ·  ") : "no active alarms"), el("br"), document.createTextNode(source));
+  $("summary").replaceChildren(document.createTextNode(parts.length ? parts.join("  ·  ") : "no active alarms"), el("br"), Object.assign(el("i"), { id: "live" }), document.createTextNode(source));
   if (pic.audio.paused) { const a = el("div", "", "audio paused " + pic.audio.remaining_s + " s (visual alarms unaffected)"); a.id = "audio"; $("summary").append(a); }
 
   const box = $("beds"); box.replaceChildren();
