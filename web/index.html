@@ -78,6 +78,7 @@
 const $ = (id) => document.getElementById(id);
 const q = new URLSearchParams(location.search);
 if (q.get("theme") === "day") document.documentElement.dataset.theme = "day";
+if (q.get("zoom")) document.body.style.zoom = q.get("zoom");   // e.g. ?zoom=0.7 to fit a whole ward on one screen
 if (q.get("clean") === "1") $("healthcard").style.display = "none"; // hide timing figures (licence: no performance claims)
 
 // key, label, unit, decimals, minimum sparkline span (so stable noise stays visually flat)
