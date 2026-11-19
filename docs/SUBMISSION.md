@@ -95,17 +95,6 @@ Illustrative software with synthetic patients. It is not a medical device and mu
 * Video: YouTube, public, under 3 minutes, no third-party trademarks or copyrighted music.
 * Codelab URL: the published `docs/CODELAB.md`.
 
-## Video script (about 2:30; real captures from the QNX VM)
+## Video script
 
-| Time | Screen | Voice-over |
-|---|---|---|
-| 0:00 | Title card | "Vigil is a patient-monitor alarm engine. It runs on QNX 8.0." |
-| 0:08 | Why it matters | "A late alarm is a failure. A constant alarm is a failure. And an old number shown as live is the worst." |
-| 0:22 | Terminal in the QNX VM: uname, ls /dev/vigil | "This is QNX 8.0 under QEMU. The engine publishes the ward as files." |
-| 0:35 | Dashboard, six stable beds | "Six synthetic patients. Everything is calm." |
-| 0:50 | Dashboard, bed 1 NEWS2 rising | "One patient is slowly getting worse. No single value is alarming yet, but the early warning score is." |
-| 1:10 | Dashboard, bed 3 sensor off | "A probe falls off. Vigil raises a technical alarm and stops judging that number." |
-| 1:30 | vigil-watch output | "Alarm changes reach a client as kernel pulses: a secure event, no polling." |
-| 1:50 | cat alarms, pause, config write | "The audible state can be paused, but the visual alarm stays. Limits change live through a file; a bad limit is rejected." |
-| 2:10 | Flood card | "Under a flood with corrupt frames the engine still tracks every bed." |
-| 2:25 | Tests on QNX, repo URL | "The same core passes 141 checks on QNX. Code, tutorial and instructions are in the repository." |
+See `docs/DEMO.md`: the 2-minute script with each scene labelled HOST, REPLAY or QNX, the capture steps and the four gallery captions. The video is not recorded yet.
