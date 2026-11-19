@@ -330,6 +330,59 @@ static void test_oxygen_expires_even_while_acvpu_keeps_arriving(void)
     CHECK(g_pic.bed[0].news2.valid && g_pic.bed[0].news2.total == 2);
 }
 
+/*
+ * The confirmation delay is intentional (3 s of onset, 5 s of release) and must not be confused with the
+ * time a decided transition takes to reach a consumer. A transition therefore records when its condition
+ * first appeared, and the delivery stamps can be added by the daemon without disturbing other events.
+ */
+static void test_transition_records_the_start_of_its_confirmation_delay(void)
+{
+    setup();
+    vg_transition_t tr[16];
+    run("1,72,98,14,122,36.8,A,0", 0, 4000, tr, 16);
+    uint32_t n = run("1,150,98,14,122,36.8,A,0", 5000, 8200, tr, 16);
+    CHECK(n >= 1 && tr[0].src == VG_HR && tr[0].to == VG_LVL_HIGH);
+    CHECK(tr[0].since_ms == 5000);                           /* first violating sample at 5000, decided at 8000 */
+
+    vg_events_t ev;
+    vg_events_init(&ev);
+    uint64_t first = ev.next_seq;
+    vg_events_push(&ev, 8000, tr, n, &g_pic);
+    vg_events_stamp(&ev, first, n, 111, 0);                  /* decided ... */
+    vg_events_stamp(&ev, first, n, 0, 222);                  /* ... and notified, stamped in a second pass */
+    vg_event_t out[8];
+    uint32_t lost = 0, m = vg_events_since(&ev, 0, out, 8, &lost);
+    CHECK(m == n && out[0].cond_ms == 5000 && out[0].t_ms - out[0].cond_ms == 3000);
+    CHECK(out[0].t_decided_ns == 111 && out[0].t_notified_ns == 222);
+
+    /* A technical alarm has no onset: it is decided in the cycle in which its cause is seen. */
+    setup();
+    run("1,72,98,14,122,36.8,A,0", 0, 4000, tr, 16);
+    uint32_t k = run("1,72,,14,122,36.8,A,0", 4100, 10000, tr, 16);
+    int found = 0;
+    for (uint32_t i = 0; i < k; i++) {
+        if (tr[i].src == VG_SRC_SENSOR && tr[i].to == VG_LVL_MEDIUM) { found = 1; CHECK(tr[i].since_ms == 9100); }
+    }
+    CHECK(found);                                            /* SpO2 last seen at 4000, expired at 9100 (> 5 s) */
+}
+
+static void test_stamping_never_touches_an_overwritten_event(void)
+{
+    vg_events_t ev;
+    vg_events_init(&ev);
+    vg_transition_t t = { 1, VG_HR, 0, 3, 0 };
+    vg_picture_t pic;
+    memset(&pic, 0, sizeof(pic));
+    uint64_t first = ev.next_seq;
+    for (int i = 0; i < VG_EVENT_RING + 5; i++) vg_events_push(&ev, (uint64_t)i, &t, 1, &pic);
+    vg_events_stamp(&ev, first, 3, 999, 999);                /* these three are long gone from the ring */
+    vg_event_t out[VG_EVENT_RING];
+    uint32_t lost = 0, m = vg_events_since(&ev, 0, out, VG_EVENT_RING, &lost);
+    int stamped = 0;
+    for (uint32_t i = 0; i < m; i++) stamped += out[i].t_decided_ns == 999;
+    CHECK(stamped == 0 && lost > 0);
+}
+
 static void test_offline_bed(void)
 {
     setup();
@@ -411,7 +464,7 @@ static void test_event_ring(void)
     setup();
     vg_transition_t tr[16];
     run("1,150,98,14,122,36.8,A,0", 0, 4000, tr, 16);
-    vg_transition_t t = { 1, VG_HR, VG_LVL_NONE, VG_LVL_HIGH };
+    vg_transition_t t = { 1, VG_HR, VG_LVL_NONE, VG_LVL_HIGH, 0 };
     vg_events_push(&r, 3000, &t, 1, &g_pic);
     CHECK(vg_events_since(&r, 0, out, VG_EVENT_RING, &lost) == 1 && out[0].value_ok && out[0].value == 150.0f);
     for (int i = 0; i < VG_EVENT_RING + 10; i++) vg_events_push(&r, 5000 + (uint64_t)i, &t, 1, &g_pic);
@@ -472,6 +525,8 @@ int main(void)
     RUN(test_context_expiry_boundary_is_the_sensor_limit);
     RUN(test_other_alarms_survive_when_news2_is_not_calculable);
     RUN(test_active_news2_alarm_is_replaced_by_a_technical_alarm_not_silence);
+    RUN(test_transition_records_the_start_of_its_confirmation_delay);
+    RUN(test_stamping_never_touches_an_overwritten_event);
     RUN(test_offline_bed);
     RUN(test_news2_raises_alarm_even_when_each_value_is_inside_limits);
     RUN(test_audio_pause_never_hides_the_alarm);

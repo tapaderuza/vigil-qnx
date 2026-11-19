@@ -182,13 +182,26 @@ static void on_tick(uint64_t tick_no, uint64_t period_ns, uint64_t t_start_ns)
     if (g_last_latency_us > g_max_latency_us) {
         g_max_latency_us = g_last_latency_us;
     }
-    if (latency_us > period_ns / 1000u) { /* a deadline is missed when the engine starts a whole period late */
+    /*
+     * g_overruns counts engine wakes that start more than one whole period after their timer expiry. It says
+     * how late the engine thread gets the CPU. It does NOT measure when an alarm reaches anyone: publishing
+     * and notifying happen after this point (see the delivery trace in docs/DELIVERY.md). Exposed as
+     * deadline_overruns in /dev/vigil/stats and shown as "late engine wakes" on the dashboard.
+     */
+    if (latency_us > period_ns / 1000u) {
         g_overruns++;
     }
 
     fill_health((uint32_t)(period_ns / 1000u));
+    const uint64_t first_seq = g_events.next_seq;
     if (ntr > 0) {
         vg_events_push(&g_events, now_ms, tr, ntr, &g_pic);
+        /*
+         * Delivery trace, point D: done_ns was read right after vg_engine_step() returned, i.e. the moment
+         * the transitions were decided. Everything after it (logging, publishing, notifying, the consumer
+         * waking up) is what the delivery measurement is about. See docs/DELIVERY.md.
+         */
+        vg_events_stamp(&g_events, first_seq, ntr, done_ns, 0);
         for (uint32_t i = 0; i < ntr; i++) {
             vgd_log(SLOG2_NOTICE, "alarm bed %u %s %s -> %s", tr[i].bed, vg_src_name(tr[i].src),
                     vg_level_name((vg_level_t)tr[i].from), vg_level_name((vg_level_t)tr[i].to));
@@ -197,6 +210,8 @@ static void on_tick(uint64_t tick_no, uint64_t period_ns, uint64_t t_start_ns)
     publish();
     if (ntr > 0) {
         notify_subscribers();
+        /* Point N: every subscriber's pulse has been delivered. Safe to stamp now: only this thread reads g_events. */
+        vg_events_stamp(&g_events, first_seq, ntr, 0, vgd_now_ns());
     }
 }
 

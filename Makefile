@@ -34,7 +34,7 @@ QNX_CFLAGS := -V$(QNX_VARIANT) -std=gnu11 $(OPT) $(WARN) $(WERROR) -D_QNX_SOURCE
 QNX_LIBS  := -lsocket -lm -lslog2
 
 HOST_BINS := $(HOST_OUT)/test_core $(HOST_OUT)/vg-replay
-QNX_BINS  := $(QNX_OUT)/vigild $(QNX_OUT)/vigil-watch $(QNX_OUT)/vigil-ctl $(QNX_OUT)/test_core $(QNX_OUT)/vg-replay
+QNX_BINS  := $(QNX_OUT)/vigild $(QNX_OUT)/vigil-watch $(QNX_OUT)/vigil-ctl $(QNX_OUT)/vigil-load $(QNX_OUT)/test_core $(QNX_OUT)/vg-replay
 
 .PHONY: all host test test-unit test-sim test-web qnx check-qnx-syntax clean
 all: host
@@ -73,6 +73,8 @@ $(QNX_OUT)/vigil-watch: tools/vigil_watch.c src/qnx/vigil_ipc.h $(CORE_SRC) $(CO
 	$(QNX_CC) $(QNX_CFLAGS) -o $@ tools/vigil_watch.c $(CORE_SRC) -lm
 $(QNX_OUT)/vigil-ctl: tools/vigil_ctl.c src/qnx/vigil_ipc.h $(CORE_SRC) $(CORE_HDR) | $(QNX_OUT)
 	$(QNX_CC) $(QNX_CFLAGS) -o $@ tools/vigil_ctl.c $(CORE_SRC) -lm
+$(QNX_OUT)/vigil-load: tools/vigil_load.c | $(QNX_OUT)
+	$(QNX_CC) $(QNX_CFLAGS) -o $@ tools/vigil_load.c
 $(QNX_OUT)/test_core: tests/unit/test_core.c $(CORE_SRC) $(CORE_HDR) | $(QNX_OUT)
 	$(QNX_CC) $(QNX_CFLAGS) -o $@ tests/unit/test_core.c $(CORE_SRC) -lm
 $(QNX_OUT)/vg-replay: tools/vg_replay.c $(CORE_SRC) $(CORE_HDR) | $(QNX_OUT)
@@ -80,7 +82,7 @@ $(QNX_OUT)/vg-replay: tools/vg_replay.c $(CORE_SRC) $(CORE_HDR) | $(QNX_OUT)
 
 STUB_FLAGS := -std=gnu11 -fsyntax-only -Wall -Wextra -Wshadow -Wformat=2 -Wno-format-nonliteral -Werror -D_GNU_SOURCE -Itests/qnx-stubs
 check-qnx-syntax: src/qnx/web_index.h
-	for f in $(QNX_SRC) tools/vigil_ctl.c tools/vigil_watch.c; do $(HOST_CC) $(STUB_FLAGS) $$f || exit 1; done
+	for f in $(QNX_SRC) tools/vigil_ctl.c tools/vigil_watch.c tools/vigil_load.c; do $(HOST_CC) $(STUB_FLAGS) $$f || exit 1; done
 	@echo "QNX sources type-check against the stand-in headers (this is NOT a qcc build)"
 
 clean:

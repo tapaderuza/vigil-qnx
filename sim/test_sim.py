@@ -144,7 +144,25 @@ def test_replay_rejects_time_going_backwards():
 
 
 def test_every_documented_scenario_exists():
-    assert {"stable", "deterioration", "desat", "probe_off", "offline", "ward"} <= set(sim.SCENARIOS)
+    assert {"stable", "deterioration", "desat", "probe_off", "offline", "ward", "delivery"} <= set(sim.SCENARIOS)
+
+
+def test_delivery_scenario_has_every_kind_of_transition_and_a_batch():
+    """The delivery trial needs known transitions, including several decided in one engine cycle."""
+    trs, _ = replay("delivery")
+    kinds = {(x.src, x.to) for x in trs}
+    assert ("SpO2", "HIGH") in kinds and ("SpO2", "NONE") in kinds         # raised after the onset, lowered after the release
+    assert ("SENSOR", "MEDIUM") in kinds and ("SENSOR", "NONE") in kinds   # technical alarm and its end
+    assert ("OFFLINE", "MEDIUM") in kinds                                  # a bed that goes silent
+    same_cycle = {}
+    for x in trs:
+        same_cycle.setdefault((x.bed, x.t), []).append(x)
+    assert any(len(v) >= 2 for v in same_cycle.values()), "no two transitions share an engine cycle"
+    assert len(trs) >= 10
+
+
+def test_delivery_scenario_is_deterministic():
+    assert replay("delivery")[0] == replay("delivery")[0]
 
 
 @pytest.mark.parametrize("name", sorted(sim.SCENARIOS))

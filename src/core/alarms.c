@@ -291,6 +291,8 @@ uint32_t vg_engine_step(vg_engine_t *e, const vg_beds_t *beds, uint64_t now_ms, 
                 trans[ntr].src = (uint8_t)s;
                 trans[ntr].from = (uint8_t)before;
                 trans[ntr].to = (uint8_t)st->level;
+                /* when the condition behind this change first appeared: the start of the onset or the release delay */
+                trans[ntr].since_ms = st->level > before ? st->cand_since : st->ok_since;
                 ntr++;
             }
             v->src_level[s] = st->level;
@@ -325,6 +327,7 @@ void vg_events_push(vg_events_t *r, uint64_t t_ms, const vg_transition_t *tr, ui
         e->src = tr[i].src;
         e->from = tr[i].from;
         e->to = tr[i].to;
+        e->cond_ms = tr[i].since_ms;
         if (tr[i].bed >= 1 && tr[i].bed <= VG_MAX_BEDS) {
             const vg_bed_view_t *v = &pic->bed[tr[i].bed - 1];
             if (tr[i].src < VG_PARAM_COUNT) {
@@ -335,6 +338,18 @@ void vg_events_push(vg_events_t *r, uint64_t t_ms, const vg_transition_t *tr, ui
                 e->value_ok = 1;
             }
         }
+    }
+}
+
+void vg_events_stamp(vg_events_t *r, uint64_t first_seq, uint32_t n, uint64_t t_decided_ns, uint64_t t_notified_ns)
+{
+    for (uint32_t i = 0; i < n; i++) {
+        uint64_t seq = first_seq + i;
+        if (seq == 0 || seq >= r->next_seq) break;
+        vg_event_t *e = &r->ev[seq % VG_EVENT_RING];
+        if (e->seq != seq) continue; /* already overwritten by a newer event */
+        if (t_decided_ns != 0) e->t_decided_ns = t_decided_ns;
+        if (t_notified_ns != 0) e->t_notified_ns = t_notified_ns;
     }
 }
 

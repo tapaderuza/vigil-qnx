@@ -263,7 +263,7 @@ function render(lv) {
 
   const h = pic.health, hl = $("health"); hl.replaceChildren();
   const live = h.cycles > 0, us = (v) => (live ? v + " µs" : "—");
-  for (const [v, l] of [[live ? h.period_us / 1000 + " ms" : "—", "period"], [us(h.last_cycle_us), "cycle"], [live ? String(h.overruns) : "—", "missed deadlines"],
+  for (const [v, l] of [[live ? h.period_us / 1000 + " ms" : "—", "period"], [us(h.last_cycle_us), "cycle"], [live ? String(h.overruns) : "—", "late engine wakes"],
                         [us(h.last_latency_us), "wake latency"], [String(h.samples), "frames"], [String(h.bad_frames), "rejected"]]) {
     const d = el("div"); d.append(el("b", "", v), el("span", "", l)); hl.append(d);
   }

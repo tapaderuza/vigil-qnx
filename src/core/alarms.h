@@ -119,7 +119,13 @@ typedef struct {
     uint32_t period_us, last_cycle_us, max_cycle_us, last_latency_us, max_latency_us, subscribers;
 } vg_picture_t;
 
-typedef struct { uint8_t bed, src, from, to; } vg_transition_t;
+/*
+ * One change of an alarm level. since_ms is when the condition behind it first appeared (the start of
+ * the onset or release delay), so decided-time minus since_ms is the intentional confirmation delay
+ * of IEC 60601-1-8 style alarms, which is a different thing from how long the already decided
+ * transition then takes to reach a consumer.
+ */
+typedef struct { uint8_t bed, src, from, to; uint64_t since_ms; } vg_transition_t;
 
 uint32_t vg_engine_step(vg_engine_t *e, const vg_beds_t *beds, uint64_t now_ms, vg_picture_t *pic,
                         vg_transition_t *trans, uint32_t max_trans);
@@ -134,6 +140,15 @@ typedef struct {
     uint8_t  bed, src, from, to;
     float    value;   /* the triggering value (NEWS2: the score) */
     uint8_t  value_ok;
+    /*
+     * Delivery trace. cond_ms comes from the engine (see vg_transition_t.since_ms). The two *_ns stamps
+     * are written by the daemon with its monotonic clock, so a consumer on the same machine can
+     * subtract its own receive time: t_decided_ns right after the engine decided the transition,
+     * t_notified_ns right after the subscribers were notified. Zero when no daemon stamped them.
+     * Events decided in the same engine cycle share t_decided_ns: that is how a batch is recognised.
+     */
+    uint64_t cond_ms;
+    uint64_t t_decided_ns, t_notified_ns;
 } vg_event_t;
 
 typedef struct { vg_event_t ev[VG_EVENT_RING]; uint64_t next_seq; } vg_events_t;
@@ -141,6 +156,8 @@ typedef struct { vg_event_t ev[VG_EVENT_RING]; uint64_t next_seq; } vg_events_t;
 void     vg_events_init(vg_events_t *r);
 void     vg_events_push(vg_events_t *r, uint64_t t_ms, const vg_transition_t *tr, uint32_t n,
                         const vg_picture_t *pic);
+/* Stamp the n events starting at first_seq (as returned by r->next_seq before the push). A zero stamp leaves that field alone. */
+void     vg_events_stamp(vg_events_t *r, uint64_t first_seq, uint32_t n, uint64_t t_decided_ns, uint64_t t_notified_ns);
 uint32_t vg_events_since(const vg_events_t *r, uint64_t since_seq, vg_event_t *out, uint32_t max,
                          uint32_t *lost);
 

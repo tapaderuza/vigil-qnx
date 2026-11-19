@@ -149,8 +149,34 @@ def sc_ward() -> Scenario:
                     [d, desat, probe, silent, stable(5, "Bed 5", hr=60), stable(6, "Bed 6", hr=84)], 1200.0)
 
 
+def sc_delivery() -> Scenario:
+    """A short, noise-free script for the delivery-latency trial (docs/DELIVERY.md).
+
+    Every kind of transition happens at a known second, at speed 1 it lasts 75 s, and the same frames give the
+    same transitions on the host (vg-replay) and on QNX, so the trial can compare "expected" with "received".
+    Bed 3 crosses two limits in the same second on purpose: those transitions are decided in one engine
+    cycle and share one notification.
+    """
+    quiet = {"hr": 0.0, "spo2": 0.0, "rr": 0.0, "sbp": 0.0, "temp": 0.0}
+    desat = stable(1, "Desaturation")
+    desat.noise = dict(quiet)
+    desat.traj = {"spo2": [(0, 97), (7, 97), (7.01, 84), (30, 84), (30.01, 97), (75, 97)]}
+    probe = stable(2, "Probe off")
+    probe.noise = dict(quiet)
+    probe.missing = {"spo2": [(12, 24)]}
+    pair = stable(3, "Two limits at once")
+    pair.noise = dict(quiet)
+    pair.traj = {"hr": [(0, 72), (14, 72), (14.01, 150), (34, 150), (34.01, 72), (75, 72)],
+                 "rr": [(0, 15), (14, 15), (14.01, 32), (34, 32), (34.01, 15), (75, 15)]}
+    silent = stable(4, "Silent bed")
+    silent.noise = dict(quiet)
+    silent.silent = [(40, 10000)]
+    return Scenario("delivery", "Delivery trial: desaturation, probe off, two limits at once, a bed that goes silent",
+                    [desat, probe, pair, silent], 75.0)
+
+
 SCENARIOS: Dict[str, Callable[[], Scenario]] = {
-    f.__name__[3:]: f for f in (sc_stable, sc_deterioration, sc_desat, sc_probe_off, sc_offline, sc_ward)
+    f.__name__[3:]: f for f in (sc_stable, sc_deterioration, sc_desat, sc_probe_off, sc_offline, sc_ward, sc_delivery)
 }
 
 
