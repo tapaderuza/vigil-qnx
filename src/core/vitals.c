@@ -4,6 +4,7 @@
  */
 #include "vitals.h"
 
+#include <math.h>
 #include <string.h>
 
 static const char *const k_name[VG_PARAM_COUNT] = { "HR", "SpO2", "RR", "SBP", "TEMP" };
@@ -29,7 +30,13 @@ int vg_sample_parse(const vg_nmea_t *s, vg_sample_t *out)
         double v;
         /* A value outside the physically possible range is treated as a sensor fault. */
         if (vg_nmea_field_double(s, 2 + p, &v) && v >= k_min[p] && v <= k_max[p]) {
-            out->v[p] = v;
+            /*
+             * Vital signs carry at most one decimal. strtod() on QNX 8.0 is not always correctly
+             * rounded (strtod("36.8") is one ulp above the compiler's literal 36.8, found by running
+             * these tests on the target), so normalise: integer / 10.0 is exact to the nearest double
+             * on every platform, and comparisons against limits behave identically everywhere.
+             */
+            out->v[p] = round(v * 10.0) / 10.0;
             out->has[p] = 1;
         }
     }
