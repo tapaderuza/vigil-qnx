@@ -1,8 +1,8 @@
 # Vigil: a patient-monitor alarm engine for QNX 8.0
 
 Vigil watches the vital signs of a ward and raises alarms the way a safety-critical system should:
-on schedule, with priorities, without crying wolf, and without ever showing a stale number as if it
-were live. It runs on **QNX 8.0** (x86_64 under QEMU, and aarch64le for Raspberry Pi 4/5).
+with priorities, with a confirmation delay so one noisy sample does not raise an alarm, and with a freshness
+rule: a reading that stops arriving is not shown as live. It runs on **QNX 8.0** (x86_64 under QEMU, and aarch64le for Raspberry Pi 4/5).
 Category: *Robotics & Medical*.
 
 > Illustrative software, not a medical device. It uses synthetic patients only and must not be used
@@ -15,20 +15,25 @@ Category: *Robotics & Medical*.
 * Raises **alarms by priority** (HIGH, MEDIUM, LOW), after the concepts of IEC 60601-1-8: a condition
   must persist before the alarm is raised (so one noisy sample never wakes a nurse), and must stay
   clear before it is lowered, with value hysteresis so a reading hovering on a limit cannot flicker.
-* Computes the **NEWS2** early warning score (Royal College of Physicians, 2017). A patient who is
-  slowly getting worse is flagged by the score minutes before any single value crosses its limit:
-  in the bundled `deterioration` scenario, about 3 minutes earlier.
+* Computes the **NEWS2** early warning score (Royal College of Physicians, 2017) using **SpO2 scale 1**
+  (the scale for patients without hypercapnic respiratory failure; scale 2 is not implemented). If a needed value
+  (including consciousness or oxygen) is missing or older than the freshness limit, NEWS2 is shown as
+  *not calculable*, never as a number. In the bundled `deterioration` scenario the first NEWS2 alarm comes 206 s
+  (3 min 26 s, simulated time) before the first single-value alarm: 531.1 s against 737.1 s.
 * Treats **technical faults separately**: a probe that falls off, or a bed that goes silent, raises a
-  technical alarm and the affected value stops being judged. The stale number is never shown as live.
-* **Audio pause** silences the sound for a fixed time but never the visual indication.
+  technical alarm and the affected value stops being judged. Each value expires on its own clock (default 5 s),
+  and the dashboard marks its own readings *historic* if vigild stops answering or stops advancing.
+* **Audible state and pause.** Vigil does not produce sound. It exposes whether an alarm is *audible* and lets
+  an operator pause that state for a fixed time; the visual indication never pauses. A real speaker or
+  nurse-call output is left to the integrator.
 
 ## Why QNX
 
 | QNX feature | Where | What it buys |
 |---|---|---|
-| Timer **pulses** (`timer_create` + `SIGEV_PULSE`) | `src/qnx/vigild.c` | the alarm engine wakes on a kernel-delivered 10 Hz pulse; its own wake latency is measured every cycle |
+| Timer **pulses** (`timer_create` + `SIGEV_PULSE`) | `src/qnx/vigild.c` | the alarm engine wakes on a kernel-delivered 10 Hz pulse; its own wake latency is measured every cycle (`deadline_overruns` counts engine wakes that were more than one period late; it does not cover publishing or notification) |
 | **Fixed priorities** (SCHED_FIFO 40 / 25 / 20 / 10) | `vgd_spawn()` | engine preempts the resource manager, which preempts ingest, which preempts the web view |
-| **Synchronous message passing** (`name_attach`, `MsgSend`, `MsgReceive`, `MsgReply`) | `vigild.c`, `ipc.c` | the engine owns all state with **no locks**; ingest and clients send it messages |
+| **Synchronous message passing** (`name_attach`, `MsgSend`, `MsgReceive`, `MsgReply`) | `vigild.c`, `ipc.c` | the engine owns the decision state and is fed by messages from ingest and clients; one priority-inheriting mutex guards the published snapshot that readers copy |
 | **Secure events** (`MsgRegisterEvent`, `MsgDeliverEvent`) | `tools/vigil_watch.c` | alarm changes pushed to a nurse-station client with no polling; only the daemon can fire the event |
 | **Resource manager** (`resmgr_attach`, `iofunc_*`) | `src/qnx/resmgr.c` | `cat /dev/vigil/alarms`; `echo "hr_high_med 110" > /dev/vigil/config` |
 | Priority-inheriting mutex, slog2, mlockall | `vigild.c` | bounded readers, an audit trail of every alarm, no page faults |
@@ -56,7 +61,7 @@ Category: *Robotics & Medical*.
 
 ```bash
 sudo bash scripts/setup-wsl.sh     # Ubuntu 24.04 / WSL2: gcc, QEMU, pytest
-make test                           # 106 C checks + 20 pytest scenarios
+make test                           # 141 C checks + 29 pytest tests + 11 dashboard tests
 source ~/qnx800/qnxsdp-env.sh       # QNX SDP 8.0 (free, QNX Everywhere)
 make qnx                            # qcc -Vgcc_ntox86_64 ; QNX_ARCH=aarch64le for the Pi
 bash scripts/qnx-demo.sh ward       # boots QNX in QEMU, runs the tests ON QNX, streams a ward
@@ -76,11 +81,17 @@ Feed it with `python3 sim/vigil_sim.py send ward --host <vm-ip> --speed 20`.
 
 ## Verified on QNX 8.0
 
-See `docs/QNX_RUN.md`: built with `qcc` (`-Werror`), all 106 core checks executed on QNX, the `ward`
+See `docs/QNX_RUN.md`: built with `qcc` (`-Werror`), all 141 core checks executed on QNX, the `ward`
 scenario streamed over UDP, a flood with corrupt frames, live configuration through the resource manager.
 Running the host tests on the target also exposed a real platform difference: `strtod("36.8")` on
 QNX 8.0 is one ulp above the compiler's literal. Vigil normalises vital signs to one decimal, so
 decisions are identical on every platform.
+
+## Delivery measurement
+
+`docs/DELIVERY.md` describes how to measure the time from a decided alarm transition to its reception by
+`vigil-watch` (`scripts/qnx-delivery.sh`). No figures are published here: the QNX non-commercial licence asks for
+written approval first, and the organisers' answer is pending.
 
 ## Licence
 

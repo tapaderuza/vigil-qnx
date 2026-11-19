@@ -13,31 +13,33 @@ Vigil: a patient-monitor alarm engine for QNX
 
 ## Tagline
 
-Alarms on schedule, with priorities, without crying wolf, and never a stale number shown as live.
+A bedside alarm engine for QNX 8.0: priorities, confirmation delays, and readings that expire instead of lingering.
 
 ## Description (paste into the story box)
 
 ### Inspiration
 
 An alarm that fires late is a failure. An alarm that fires too often is also a failure: alarm fatigue is a
-well-documented hazard on hospital wards, because staff learn to ignore a monitor that cries wolf. And the
-quietest failure of all is a monitor that keeps showing the last reading after a probe has fallen off. That
+well-documented hazard on hospital wards, because staff learn to ignore a monitor that cries wolf. And a
+quiet failure is a monitor that keeps showing the last reading after a probe has fallen off. That
 combination of timing, restraint and honesty is exactly what a real-time operating system is for, so we built
 a bedside alarm engine on QNX 8.0.
 
 ### What it does
 
 Vigil reads vital-sign frames for every bed (heart rate, SpO2, respiration, blood pressure, temperature,
-consciousness, oxygen) over UDP, checks them, and raises alarms the way a safety-critical system should.
+consciousness, oxygen) over UDP, checks them, and raises alarms with the concepts a safety-critical system uses.
 
 * **Priorities and delays.** HIGH, MEDIUM and LOW alarms after the concepts of IEC 60601-1-8. A limit must stay
   violated for a few seconds before an alarm is raised, so one noisy sample never wakes a nurse, and the value must
   stay back in range before it is lowered, with hysteresis so a reading hovering on a limit cannot flicker.
-* **NEWS2 early warning score.** A patient who is slowly getting worse is flagged by the score about three minutes
-  before any single value crosses its own limit (in the bundled `deterioration` scenario).
+* **NEWS2 early warning score (SpO2 scale 1).** In the bundled simulated `deterioration` scenario the first NEWS2 alarm
+  comes 3 min 26 s (206 s of simulated time) before the first single-value alarm. If a needed value is missing or
+  expired, NEWS2 is shown as not calculable instead of a number.
 * **Honest about faults.** A probe that falls off, or a bed that goes silent, raises a technical alarm and the
-  affected value stops being judged. The stale number is never shown as if it were current.
-* **Audio pause that cannot hide anything.** It silences the sound for a fixed time; the visual alarm stays.
+  affected value stops being judged. Each value expires on its own clock (5 s by default); the dashboard marks its readings historic when the daemon stops answering.
+* **Audible state and pause.** Vigil does not play sound; it exposes whether an alarm is audible and lets an operator pause
+  that state for a fixed time. The visual alarm stays.
 
 It is shown three ways: a quiet bedside dashboard, plain files under /dev/vigil, and a live feed driven by
 kernel pulses.
@@ -46,8 +48,8 @@ kernel pulses.
 
 * **Timer pulse and a SCHED_FIFO engine** (`src/qnx/vigild.c`, `on_tick`, `main`): the alarm engine wakes on a kernel
   timer pulse and measures its own wake latency and cycle time on every cycle.
-* **Message passing as the only synchronisation** (`vigild.c`, `ipc.c`, `vigil_ipc.h`): the engine owns all state with
-  no locks. The ingest thread, at a lower priority, decodes the network feed and MsgSends one message per valid
+* **Message passing as the only synchronisation** (`vigild.c`, `ipc.c`, `vigil_ipc.h`): the engine owns the decision state and
+  is fed by messages (one priority-inheriting mutex guards the published snapshot that readers copy). The ingest thread, at a lower priority, decodes the network feed and MsgSends one message per valid
   frame, so a flood of garbage costs the engine almost nothing and is preempted by every timer pulse.
 * **Secure events** (`tools/vigil_watch.c`, `handle_subscribe`): a nurse-station client registers a pulse with
   MsgRegisterEvent and the engine fires it with MsgDeliverEvent when an alarm changes. No polling, and only the
@@ -59,9 +61,9 @@ kernel pulses.
 ### How we built it
 
 The decision logic (frame decoding, NEWS2, the alarm engine) is portable C11 with no allocation and no QNX
-dependency, so the same sources run in 106 unit checks on a PC and on QNX. A simulator generates synthetic
-patients (a gradual decline, an acute desaturation, a probe fault, a silent bed, a busy ward) and 20 regression
-scenarios assert what a clinician would expect. The QNX layer is a thin set of threads around that core.
+dependency, so the same sources run in 141 unit checks on a PC and on QNX. A simulator generates synthetic
+patients (a gradual decline, an acute desaturation, a probe fault, a silent bed, a busy ward) and 29 regression
+tests, plus 11 tests for the dashboard's freshness logic assert what a clinician would expect. The QNX layer is a thin set of threads around that core.
 
 ### Challenges and what running on the target taught us
 
@@ -98,12 +100,12 @@ Illustrative software with synthetic patients. It is not a medical device and mu
 | Time | Screen | Voice-over |
 |---|---|---|
 | 0:00 | Title card | "Vigil is a patient-monitor alarm engine. It runs on QNX 8.0." |
-| 0:08 | Why it matters | "A late alarm is a failure. A constant alarm is a failure. And a stale number shown as live is the worst." |
+| 0:08 | Why it matters | "A late alarm is a failure. A constant alarm is a failure. And an old number shown as live is the worst." |
 | 0:22 | Terminal in the QNX VM: uname, ls /dev/vigil | "This is QNX 8.0 under QEMU. The engine publishes the ward as files." |
 | 0:35 | Dashboard, six stable beds | "Six synthetic patients. Everything is calm." |
 | 0:50 | Dashboard, bed 1 NEWS2 rising | "One patient is slowly getting worse. No single value is alarming yet, but the early warning score is." |
-| 1:10 | Dashboard, bed 3 sensor off | "A probe falls off. Vigil raises a technical alarm and stops judging that number instead of showing a stale one." |
+| 1:10 | Dashboard, bed 3 sensor off | "A probe falls off. Vigil raises a technical alarm and stops judging that number." |
 | 1:30 | vigil-watch output | "Alarm changes reach a client as kernel pulses: a secure event, no polling." |
-| 1:50 | cat alarms, pause, config write | "Audio can be paused, but the visual alarm stays. Limits change live through a file; a bad limit is rejected." |
-| 2:10 | Flood card | "Under a flood with corrupt frames the engine keeps its schedule: zero missed deadlines." |
-| 2:25 | Tests on QNX, repo URL | "The same core passes 106 checks on QNX. Code, tutorial and instructions are in the repository." |
+| 1:50 | cat alarms, pause, config write | "The audible state can be paused, but the visual alarm stays. Limits change live through a file; a bad limit is rejected." |
+| 2:10 | Flood card | "Under a flood with corrupt frames the engine still tracks every bed." |
+| 2:25 | Tests on QNX, repo URL | "The same core passes 141 checks on QNX. Code, tutorial and instructions are in the repository." |

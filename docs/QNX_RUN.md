@@ -6,17 +6,19 @@ Guest: `QNX noname 8.0.0 2026/10/30-09:10:05EDT x86pc x86_64`.
 
 | Step | Result |
 |---|---|
-| `make qnx QNX_ARCH=x86_64` (`-Werror`) | all five binaries build: vigild, vigil-ctl, vigil-watch, test_core, vg-replay |
-| `test_core` executed ON QNX | 106 checks, 0 failures |
+| `make qnx QNX_ARCH=x86_64` (`-Werror`) | all six binaries build: vigild, vigil-ctl, vigil-watch, vigil-load, test_core, vg-replay |
+| `test_core` executed ON QNX | 141 checks, 0 failures |
 | `vigild` start | engine (priority 40), resource manager (25), ingest UDP (20), HTTP 8080 (10); five devices under `/dev/vigil` |
 | `ward` scenario streamed over UDP | 6905 frames, 0 rejected; bed 2 desaturation raised and cleared, bed 1 NEWS2 escalates to HIGH, bed 3 probe-off as a technical alarm, bed 4 reported offline |
 | `vigil-watch` (secure event + pulse) | received the transitions without polling |
-| flood: 93,674 datagrams with 30 percent corrupt frames | 21,524 corrupt frames rejected, all beds still tracked, `deadline_overruns 0` |
-| `vigil-ctl pause` | audio pause reported, the visual alarm stays |
+| flood: 93,674 datagrams with 30 percent corrupt frames | 21,524 corrupt frames rejected, all beds still tracked |
+| `vigil-ctl pause` | audible state paused and reported, the visual alarm stays (Vigil produces no sound) |
 | `echo "hr_high_med 110" > /dev/vigil/config` | applied; `hr_high_med 999` is rejected with exit 1 |
 
 The same scenarios give the same alarm transitions on the host (`sim/test_sim.py`) and on QNX.
-No latency figures are published here: the non-commercial licence restricts publishing performance results.
+No latency figures are published here: the non-commercial licence restricts publishing performance results (see `docs/DELIVERY.md`).
+The counts above (tests, frames, transitions) come from the 2026-10 run on that guest; later runs describe only themselves.
+The delivery trial of 2026-11-19 on that guest received all 15 expected transitions, in order, idle and under load.
 
 ## Finding: strtod on QNX 8.0
 
