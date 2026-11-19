@@ -35,8 +35,9 @@ static const char *colour(vg_level_t l)
         return "";
     }
     switch (l) {
-    case VG_LEVEL_DANGER: return "\x1b[1;31m";
-    case VG_LEVEL_WARNING: return "\x1b[1;33m";
+    case VG_LVL_HIGH: return "\x1b[1;31m";
+    case VG_LVL_MEDIUM: return "\x1b[1;33m";
+    case VG_LVL_LOW: return "\x1b[36m";
     default: return "\x1b[32m";
     }
 }
@@ -65,13 +66,11 @@ static unsigned drain(int srv, uint64_t *since)
         }
         for (uint32_t i = 0; i < rep.n; i++) {
             const vg_event_t *e = &rep.ev[i];
-            printf("%s%-7s%s %09u %-20s %s -> %s", colour((vg_level_t)e->to),
-                   vg_level_name((vg_level_t)e->to), reset(), e->mmsi, e->name[0] ? e->name : "-",
-                   vg_level_name((vg_level_t)e->from), vg_level_name((vg_level_t)e->to));
-            if (e->evaluated) {
-                printf("  cpa %.2f nm  tcpa %.1f min  rng %.2f nm  brg %03.0f  %s", e->cpa_nm,
-                       e->tcpa_min, e->range_nm, e->bearing_deg,
-                       vg_encounter_name((vg_encounter_t)e->enc));
+            printf("%s%-7s%s bed %u  %-7s %s -> %s", colour((vg_level_t)e->to),
+                   e->to == VG_LVL_NONE ? "CLEARED" : vg_level_name((vg_level_t)e->to), reset(), e->bed,
+                   vg_src_name(e->src), vg_level_name((vg_level_t)e->from), vg_level_name((vg_level_t)e->to));
+            if (e->value_ok) {
+                printf("  value %.*f", e->src == VG_TEMP ? 1 : 0, e->value);
             }
             printf("\n");
             printed++;

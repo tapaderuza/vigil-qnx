@@ -1,20 +1,18 @@
 /*
  * Vigil - native QNX message-passing protocol.
  *
- * The engine thread of vigild owns a named channel ("vigil", registered
- * with name_attach()). Everything that changes or queries the picture goes
- * through it as a synchronous message:
+ * The engine thread of vigild owns a named channel ("vigil", registered with name_attach()).
+ * Everything that changes or queries the ward goes through it as a synchronous message:
  *
- *   ingest thread  --MsgSend--> engine   decoded AIS reports and own-ship fixes
- *   vigil-ctl    --MsgSend--> engine   stats / alarms / tracks / config
- *   vigil-watch  --MsgSend--> engine   SUBSCRIBE with a *secure event*
+ *   ingest thread  --MsgSend--> engine   one decoded vital-sign frame
+ *   vigil-ctl      --MsgSend--> engine   beds / alarms / stats / config, audio pause
+ *   vigil-watch    --MsgSend--> engine   SUBSCRIBE with a *secure event*
  *   engine         --MsgDeliverEvent--> subscriber   a pulse when an alarm changes
  *
- * Rules of the road (QNX System Architecture guide, IPC chapter):
- *  - every message starts with a uint16_t type above _IO_MAX (the system range);
- *  - the engine never blocks on a client: it only replies, or delivers an event;
- *  - subscribers register their event with MsgRegisterEvent() against the
- *    engine's connection, so only the engine can fire it.
+ * Rules of the road (QNX System Architecture guide, IPC chapter): every message starts with a
+ * uint16_t type above _IO_MAX; the engine never blocks on a client, it only replies or delivers
+ * an event; subscribers register their event with MsgRegisterEvent() against the engine's
+ * connection, so only the engine can fire it.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -25,24 +23,23 @@
 #include <stdint.h>
 #include <sys/iomsg.h>
 
-#include "../core/ais.h"
-#include "../core/engine.h"
+#include "../core/alarms.h"
 #include "../core/nmea.h"
+#include "../core/vitals.h"
 
 #define VG_SERVICE_NAME "vigil"
 
-#define VG_MSG_AIS         (_IO_MAX + 0x10) /* ingest -> engine: a decoded AIS report */
-#define VG_MSG_FIX         (_IO_MAX + 0x11) /* ingest -> engine: an own-ship GNSS fix */
+#define VG_MSG_SAMPLE      (_IO_MAX + 0x10) /* ingest -> engine: one decoded vital-sign frame */
 #define VG_MSG_SUBSCRIBE   (_IO_MAX + 0x20) /* client: deliver this event on alarm changes */
 #define VG_MSG_UNSUBSCRIBE (_IO_MAX + 0x21)
 #define VG_MSG_GET_EVENTS  (_IO_MAX + 0x22) /* client: alarm transitions since a sequence number */
-#define VG_MSG_GET_TEXT    (_IO_MAX + 0x23) /* client: rendered stats / alarms / tracks / config */
-#define VG_MSG_CONFIG      (_IO_MAX + 0x24) /* client: change one setting */
+#define VG_MSG_GET_TEXT    (_IO_MAX + 0x23) /* client: rendered beds / alarms / stats / config */
+#define VG_MSG_CONFIG      (_IO_MAX + 0x24) /* client: change one setting, or "pause 1" / "resume 1" / "reset_stats 1" */
 
 enum vg_text_kind {
     VG_TEXT_STATS  = 1,
     VG_TEXT_ALARMS = 2,
-    VG_TEXT_TRACKS = 3,
+    VG_TEXT_BEDS   = 3,
     VG_TEXT_CONFIG = 4
 };
 
@@ -58,13 +55,8 @@ typedef struct {
 
 typedef struct {
     vg_msg_hdr_t h;
-    vg_ais_msg_t ais;
-} vg_msg_ais_t;
-
-typedef struct {
-    vg_msg_hdr_t  h;
-    vg_nmea_fix_t fix;
-} vg_msg_fix_t;
+    vg_sample_t  sample;
+} vg_msg_sample_t;
 
 typedef struct {
     vg_msg_hdr_t    h;
@@ -83,15 +75,14 @@ typedef struct {
 
 typedef struct {
     vg_msg_hdr_t h;
-    char         line[VG_CFG_LINE]; /* "warn_cpa_nm 1.5", or "reset_stats 1" */
+    char         line[VG_CFG_LINE];
 } vg_msg_config_t;
 
 /* What the engine thread can receive on its channel. */
 typedef union {
     uint16_t            type;
     vg_msg_hdr_t        h;
-    vg_msg_ais_t        ais;
-    vg_msg_fix_t        fix;
+    vg_msg_sample_t     sample;
     vg_msg_subscribe_t  sub;
     vg_msg_get_events_t get_events;
     vg_msg_get_text_t   get_text;

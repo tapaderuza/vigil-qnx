@@ -1,15 +1,17 @@
 /*
- * vigild - real-time collision vigil daemon for QNX 8.0.
+ * vigild - real-time patient-monitor alarm daemon for QNX 8.0.
  *
  * The main thread becomes the *engine*: a SCHED_FIFO thread that
- *   - owns every piece of mutable state (tracks, own ship, alarms, events),
- *   - wakes on a periodic timer *pulse* (default 10 Hz) to evaluate CPA/TCPA,
- *   - receives decoded AIS/GNSS messages from the ingest thread, and queries
- *     from vigil-ctl / vigil-watch, on one named channel,
+ *   - owns every piece of mutable state (beds, alarm state, events),
+ *   - wakes on a periodic timer *pulse* (default 10 Hz) to evaluate every alarm condition,
+ *   - receives decoded vital-sign frames from the ingest thread, and queries from vigil-ctl and
+ *     vigil-watch, on one named channel,
  *   - tells subscribers about alarm changes with MsgDeliverEvent().
  *
- * No locks protect the engine state because nothing else touches it; the
- * microkernel's synchronous message passing is the synchronisation.
+ * No locks protect the engine state because nothing else touches it; the microkernel's
+ * synchronous message passing is the synchronisation.
+ *
+ * Vigil is a software exercise, not a medical device.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -30,19 +32,18 @@
 
 #define VG_PULSE_TICK (_PULSE_CODE_MINAVAIL + 1)
 #define VG_PULSE_QUIT (_PULSE_CODE_MINAVAIL + 2)
-#define VG_TRACK_MAX_AGE_MS (10ull * 60ull * 1000ull)
 
-lkd_options_t   g_opt;
-int             g_engine_chid = -1;
-lkd_counters_t  g_cnt;
-slog2_buffer_t  g_slog;
+vgd_options_t  g_opt;
+int            g_engine_chid = -1;
+vgd_counters_t g_cnt;
+slog2_buffer_t g_slog;
 
 /* ------------------------------------------------------------- publishing */
 
 static pthread_mutex_t g_pub_lock;
-static lkd_pub_t       g_pub;
+static vgd_pub_t       g_pub;
 
-void lkd_pub_snapshot(lkd_pub_t *dst)
+void vgd_pub_snapshot(vgd_pub_t *dst)
 {
     pthread_mutex_lock(&g_pub_lock);
     memcpy(dst, &g_pub, sizeof(*dst));
@@ -51,14 +52,14 @@ void lkd_pub_snapshot(lkd_pub_t *dst)
 
 /* ---------------------------------------------------------------- helpers */
 
-uint64_t lkd_now_ns(void)
+uint64_t vgd_now_ns(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-void lkd_log(int severity, const char *fmt, ...)
+void vgd_log(int severity, const char *fmt, ...)
 {
     char line[256];
     va_list ap;
@@ -73,7 +74,7 @@ void lkd_log(int severity, const char *fmt, ...)
     }
 }
 
-int lkd_spawn(pthread_t *t, int prio, const char *name, void *(*fn)(void *))
+int vgd_spawn(pthread_t *t, int prio, const char *name, void *(*fn)(void *))
 {
     pthread_attr_t attr;
     struct sched_param sp;
@@ -85,8 +86,8 @@ int lkd_spawn(pthread_t *t, int prio, const char *name, void *(*fn)(void *))
     pthread_attr_setschedparam(&attr, &sp);
     int rc = pthread_create(t, &attr, fn, NULL);
     if (rc != 0) {
-        lkd_log(SLOG2_WARNING, "cannot start %s at priority %d (%s); using inherited priority",
-                name, prio, strerror(rc));
+        vgd_log(SLOG2_WARNING, "cannot start %s at priority %d (%s); using inherited priority", name, prio,
+                strerror(rc));
         pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
         rc = pthread_create(t, &attr, fn, NULL);
     }
@@ -94,18 +95,17 @@ int lkd_spawn(pthread_t *t, int prio, const char *name, void *(*fn)(void *))
     if (rc == 0) {
         pthread_setname_np(*t, name);
     } else {
-        lkd_log(SLOG2_ERROR, "cannot start %s: %s", name, strerror(rc));
+        vgd_log(SLOG2_ERROR, "cannot start %s: %s", name, strerror(rc));
     }
     return rc;
 }
 
 /* ----------------------------------------------------------- engine state */
 
-static vg_tracks_t   g_tracks;
-static vg_ownship_t  g_own;
-static vg_engine_t   g_engine;
-static vg_picture_t  g_pic;
-static vg_events_t   g_events;
+static vg_beds_t    g_beds;
+static vg_engine_t  g_engine;
+static vg_picture_t g_pic;
+static vg_events_t  g_events;
 
 static struct {
     int             active;
@@ -116,7 +116,6 @@ static struct {
 
 static uint64_t g_cycles, g_overruns;
 static uint32_t g_last_cycle_us, g_max_cycle_us, g_last_latency_us, g_max_latency_us;
-static uint64_t g_last_expire_ms;
 static char     g_text[VG_TEXT_MAX];
 
 static void publish(void)
@@ -141,8 +140,7 @@ static void notify_subscribers(void)
 {
     for (int i = 0; i < VG_MAX_SUBSCRIBERS; i++) {
         if (g_subs[i].active && MsgDeliverEvent(g_subs[i].rcvid, &g_subs[i].ev) == -1) {
-            lkd_log(SLOG2_INFO, "dropping subscriber (scoid %d): %s", g_subs[i].scoid,
-                    strerror(errno));
+            vgd_log(SLOG2_INFO, "dropping subscriber (scoid %d): %s", g_subs[i].scoid, strerror(errno));
             g_subs[i].active = 0;
         }
     }
@@ -157,31 +155,23 @@ static void fill_health(uint32_t period_us)
     g_pic.max_cycle_us = g_max_cycle_us;
     g_pic.last_latency_us = g_last_latency_us;
     g_pic.max_latency_us = g_max_latency_us;
-    g_pic.sentences = atomic_load(&g_cnt.sentences);
-    g_pic.bad_sentences = atomic_load(&g_cnt.bad_sentences);
-    g_pic.ais_msgs = atomic_load(&g_cnt.ais_msgs);
-    g_pic.ais_errors = atomic_load(&g_cnt.ais_errors);
-    g_pic.ownship_fixes = atomic_load(&g_cnt.ownship_fixes);
+    g_pic.samples = atomic_load(&g_cnt.samples);
+    g_pic.bad_frames = atomic_load(&g_cnt.bad_frames);
     g_pic.subscribers = count_subs();
 }
 
 /* One evaluation cycle, driven by the timer pulse. */
 static void on_tick(uint64_t tick_no, uint64_t period_ns, uint64_t t_start_ns)
 {
-    const uint64_t wake_ns = lkd_now_ns();
+    const uint64_t wake_ns = vgd_now_ns();
     const uint64_t due_ns = t_start_ns + tick_no * period_ns;
     const uint64_t latency_us = wake_ns > due_ns ? (wake_ns - due_ns) / 1000u : 0u;
     const uint64_t now_ms = wake_ns / 1000000u;
 
-    if (now_ms - g_last_expire_ms >= 1000u) {
-        vg_tracks_expire(&g_tracks, now_ms, VG_TRACK_MAX_AGE_MS);
-        g_last_expire_ms = now_ms;
-    }
-
     vg_transition_t tr[32];
-    uint32_t ntr = vg_engine_step(&g_engine, &g_tracks, &g_own, now_ms, &g_pic, tr, 32);
+    uint32_t ntr = vg_engine_step(&g_engine, &g_beds, now_ms, &g_pic, tr, 32);
 
-    const uint64_t done_ns = lkd_now_ns();
+    const uint64_t done_ns = vgd_now_ns();
     const uint32_t cycle_us = (uint32_t)((done_ns - wake_ns) / 1000u);
     g_cycles++;
     g_last_cycle_us = cycle_us;
@@ -192,8 +182,7 @@ static void on_tick(uint64_t tick_no, uint64_t period_ns, uint64_t t_start_ns)
     if (g_last_latency_us > g_max_latency_us) {
         g_max_latency_us = g_last_latency_us;
     }
-    /* A deadline is missed when the engine starts a whole period late. */
-    if (latency_us > period_ns / 1000u) {
+    if (latency_us > period_ns / 1000u) { /* a deadline is missed when the engine starts a whole period late */
         g_overruns++;
     }
 
@@ -201,8 +190,8 @@ static void on_tick(uint64_t tick_no, uint64_t period_ns, uint64_t t_start_ns)
     if (ntr > 0) {
         vg_events_push(&g_events, now_ms, tr, ntr, &g_pic);
         for (uint32_t i = 0; i < ntr; i++) {
-            lkd_log(SLOG2_NOTICE, "alarm %09u %s -> %s", tr[i].mmsi, vg_level_name(tr[i].from),
-                    vg_level_name(tr[i].to));
+            vgd_log(SLOG2_NOTICE, "alarm bed %u %s %s -> %s", tr[i].bed, vg_src_name(tr[i].src),
+                    vg_level_name((vg_level_t)tr[i].from), vg_level_name((vg_level_t)tr[i].to));
         }
     }
     publish();
@@ -222,34 +211,50 @@ static int require(rcvid_t rcvid, const struct _msg_info *info, size_t want)
     return 1;
 }
 
+static void reply_text(rcvid_t rcvid, long status, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+static void reply_text(rcvid_t rcvid, long status, const char *fmt, ...)
+{
+    char out[128];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(out, sizeof(out), fmt, ap);
+    va_end(ap);
+    MsgReply(rcvid, status, out, (size_t)(n > 0 ? n : 0) + 1);
+}
+
 static void handle_config(rcvid_t rcvid, const vg_msg_config_t *m)
 {
     char line[VG_CFG_LINE];
-    char out[128];
     memcpy(line, m->line, sizeof(line));
     line[sizeof(line) - 1] = '\0';
     size_t n = strlen(line);
     while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r' || line[n - 1] == ' ')) {
         line[--n] = '\0';
     }
-    if (strncmp(line, "reset_stats", 11) == 0) {
+    const uint64_t now_ms = vgd_now_ns() / 1000000u;
+    if (strncmp(line, "pause", 5) == 0) {
+        vg_engine_pause_audio(&g_engine, now_ms);
+        vgd_log(SLOG2_NOTICE, "audio paused for %llu s", (unsigned long long)(g_engine.cfg.pause_ms / 1000u));
+        reply_text(rcvid, 0, "ok\n");
+    } else if (strncmp(line, "resume", 6) == 0) {
+        vg_engine_resume_audio(&g_engine);
+        vgd_log(SLOG2_NOTICE, "audio resumed");
+        reply_text(rcvid, 0, "ok\n");
+    } else if (strncmp(line, "reset_stats", 11) == 0) {
         g_max_cycle_us = 0;
         g_max_latency_us = 0;
         g_overruns = 0;
-        lkd_log(SLOG2_INFO, "timing statistics reset");
-        n = (size_t)snprintf(out, sizeof(out), "ok\n");
-        MsgReply(rcvid, 0, out, n + 1);
-        return;
-    }
-    char err[96];
-    if (vg_alarm_cfg_apply(&g_engine.cfg, line, err, sizeof(err)) == 0) {
-        lkd_log(SLOG2_INFO, "config: %s", line);
-        n = (size_t)snprintf(out, sizeof(out), "ok\n");
-        MsgReply(rcvid, 0, out, n + 1);
+        vgd_log(SLOG2_INFO, "timing statistics reset");
+        reply_text(rcvid, 0, "ok\n");
     } else {
-        lkd_log(SLOG2_WARNING, "config rejected (%s): %s", line, err);
-        n = (size_t)snprintf(out, sizeof(out), "rejected: %s\n", err);
-        MsgReply(rcvid, 1, out, n + 1);
+        char err[96];
+        if (vg_alarm_cfg_apply(&g_engine.cfg, line, err, sizeof(err)) == 0) {
+            vgd_log(SLOG2_INFO, "config: %s", line);
+            reply_text(rcvid, 0, "ok\n");
+        } else {
+            vgd_log(SLOG2_WARNING, "config rejected (%s): %s", line, err);
+            reply_text(rcvid, 1, "rejected: %s\n", err);
+        }
     }
 }
 
@@ -257,18 +262,10 @@ static void handle_get_text(rcvid_t rcvid, uint32_t kind)
 {
     size_t len = 0;
     switch (kind) {
-    case VG_TEXT_STATS:
-        len = vg_render_stats(&g_pic, &g_engine.cfg, g_text, sizeof(g_text));
-        break;
-    case VG_TEXT_ALARMS:
-        len = vg_render_alarms(&g_pic, g_text, sizeof(g_text));
-        break;
-    case VG_TEXT_TRACKS:
-        len = vg_render_tracks(&g_pic, g_text, sizeof(g_text));
-        break;
-    case VG_TEXT_CONFIG:
-        len = vg_render_config(&g_engine.cfg, g_text, sizeof(g_text));
-        break;
+    case VG_TEXT_STATS: len = vg_render_stats(&g_pic, g_text, sizeof(g_text)); break;
+    case VG_TEXT_ALARMS: len = vg_render_alarms(&g_pic, &g_engine.cfg, g_text, sizeof(g_text)); break;
+    case VG_TEXT_BEDS: len = vg_render_beds(&g_pic, g_text, sizeof(g_text)); break;
+    case VG_TEXT_CONFIG: len = vg_render_config(&g_engine.cfg, g_text, sizeof(g_text)); break;
     default:
         MsgError(rcvid, EINVAL);
         return;
@@ -284,8 +281,7 @@ static void handle_get_events(rcvid_t rcvid, uint64_t since)
     MsgReply(rcvid, EOK, &rep, offsetof(vg_events_reply_t, ev) + rep.n * sizeof(vg_event_t));
 }
 
-static void handle_subscribe(rcvid_t rcvid, const struct _msg_info *info,
-                             const vg_msg_subscribe_t *m)
+static void handle_subscribe(rcvid_t rcvid, const struct _msg_info *info, const vg_msg_subscribe_t *m)
 {
     int slot = -1;
     for (int i = 0; i < VG_MAX_SUBSCRIBERS; i++) {
@@ -306,46 +302,21 @@ static void handle_subscribe(rcvid_t rcvid, const struct _msg_info *info,
     g_subs[slot].scoid = info->scoid;
     g_subs[slot].ev = m->ev;
     MsgReply(rcvid, EOK, NULL, 0);
-    lkd_log(SLOG2_INFO, "subscriber added (scoid %d)", info->scoid);
+    vgd_log(SLOG2_INFO, "subscriber added (scoid %d)", info->scoid);
 }
 
 static void handle_message(rcvid_t rcvid, const vg_msg_any_t *m, const struct _msg_info *info)
 {
-    uint64_t now_ms;
     switch (m->type) {
     case _IO_CONNECT:
-        /* name_open() may probe with a connect message; accept it. */
-        MsgReply(rcvid, EOK, NULL, 0);
+        MsgReply(rcvid, EOK, NULL, 0); /* name_open() may probe with a connect message */
         return;
 
-    case VG_MSG_AIS:
-        if (!require(rcvid, info, sizeof(vg_msg_ais_t))) {
-            return;
+    case VG_MSG_SAMPLE:
+        if (require(rcvid, info, sizeof(vg_msg_sample_t))) {
+            vg_beds_apply(&g_beds, &m->sample.sample, vgd_now_ns() / 1000000u);
+            MsgReply(rcvid, EOK, NULL, 0);
         }
-        now_ms = lkd_now_ns() / 1000000u;
-        if (m->ais.ais.own) {
-            vg_ownship_apply_ais(&g_own, &m->ais.ais, now_ms);
-            atomic_fetch_add(&g_cnt.ownship_fixes, 1);
-            if (g_own.valid) {
-                vg_tracks_set_reference(&g_tracks, g_own.lat_deg, g_own.lon_deg);
-            }
-        } else {
-            vg_tracks_apply(&g_tracks, &m->ais.ais, now_ms);
-        }
-        MsgReply(rcvid, EOK, NULL, 0);
-        return;
-
-    case VG_MSG_FIX:
-        if (!require(rcvid, info, sizeof(vg_msg_fix_t))) {
-            return;
-        }
-        now_ms = lkd_now_ns() / 1000000u;
-        vg_ownship_apply_fix(&g_own, &m->fix.fix, now_ms);
-        atomic_fetch_add(&g_cnt.ownship_fixes, 1);
-        if (g_own.valid) {
-            vg_tracks_set_reference(&g_tracks, g_own.lat_deg, g_own.lon_deg);
-        }
-        MsgReply(rcvid, EOK, NULL, 0);
         return;
 
     case VG_MSG_SUBSCRIBE:
@@ -418,7 +389,7 @@ static void engine_loop(name_attach_t *attach, uint64_t period_ns, uint64_t t_st
             if (errno == EINTR) {
                 continue;
             }
-            lkd_log(SLOG2_ERROR, "MsgReceive failed: %s", strerror(errno));
+            vgd_log(SLOG2_ERROR, "MsgReceive failed: %s", strerror(errno));
             return;
         }
         if (rcvid == 0) {
@@ -427,7 +398,7 @@ static void engine_loop(name_attach_t *attach, uint64_t period_ns, uint64_t t_st
                 on_tick(++tick_no, period_ns, t_start_ns);
                 break;
             case VG_PULSE_QUIT:
-                lkd_log(SLOG2_NOTICE, "shutting down");
+                vgd_log(SLOG2_NOTICE, "shutting down");
                 return;
             case _PULSE_CODE_DISCONNECT:
                 for (int i = 0; i < VG_MAX_SUBSCRIBERS; i++) {
@@ -438,7 +409,7 @@ static void engine_loop(name_attach_t *attach, uint64_t period_ns, uint64_t t_st
                 ConnectDetach(buf.pulse.scoid);
                 break;
             default:
-                break; /* _PULSE_CODE_UNBLOCK etc.: nothing to do, we never block clients */
+                break;
             }
             continue;
         }
@@ -450,8 +421,8 @@ static void usage(const char *argv0)
 {
     fprintf(stderr,
             "usage: %s [options]\n"
-            "  -u PORT   UDP port for NMEA/AIS input (default 10110)\n"
-            "  -g ADDR   also join this IPv4 multicast group (e.g. 239.192.0.1)\n"
+            "  -u PORT   UDP port for vital-sign frames (default 10120)\n"
+            "  -g ADDR   also join this IPv4 multicast group\n"
             "  -w PORT   HTTP dashboard port, 0 = off (default 8080)\n"
             "  -b ADDR   HTTP bind address (default 0.0.0.0; use 127.0.0.1 to keep it local)\n"
             "  -p MS     engine period in milliseconds, 10..1000 (default 100)\n"
@@ -463,7 +434,7 @@ static void usage(const char *argv0)
 
 int main(int argc, char **argv)
 {
-    g_opt.udp_port = 10110;
+    g_opt.udp_port = 10120;
     g_opt.http_port = 8080;
     snprintf(g_opt.http_bind, sizeof(g_opt.http_bind), "0.0.0.0");
     g_opt.period_ms = 100;
@@ -490,8 +461,8 @@ int main(int argc, char **argv)
         default: usage(argv[0]); return opt == 'h' ? 0 : 2;
         }
     }
-    if (g_opt.period_ms < 10 || g_opt.period_ms > 1000 || g_opt.udp_port <= 0 ||
-        g_opt.udp_port > 65535 || g_opt.http_port < 0 || g_opt.http_port > 65535) {
+    if (g_opt.period_ms < 10 || g_opt.period_ms > 1000 || g_opt.udp_port <= 0 || g_opt.udp_port > 65535 ||
+        g_opt.http_port < 0 || g_opt.http_port > 65535) {
         usage(argv[0]);
         return 2;
     }
@@ -513,8 +484,7 @@ int main(int argc, char **argv)
     pthread_mutex_init(&g_pub_lock, &ma);
     pthread_mutexattr_destroy(&ma);
 
-    vg_tracks_init(&g_tracks);
-    memset(&g_own, 0, sizeof(g_own));
+    vg_beds_init(&g_beds);
     vg_alarm_cfg_t cfg_default;
     vg_alarm_cfg_default(&cfg_default);
     vg_engine_init(&g_engine, &cfg_default);
@@ -523,13 +493,12 @@ int main(int argc, char **argv)
 
     signal(SIGPIPE, SIG_IGN);
     if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
-        lkd_log(SLOG2_WARNING, "mlockall failed (%s): page faults may add latency", strerror(errno));
+        vgd_log(SLOG2_WARNING, "mlockall failed (%s): page faults may add latency", strerror(errno));
     }
 
     name_attach_t *attach = name_attach(NULL, VG_SERVICE_NAME, 0);
     if (attach == NULL) {
-        lkd_log(SLOG2_CRITICAL, "name_attach(\"%s\") failed: %s (already running?)",
-                VG_SERVICE_NAME, strerror(errno));
+        vgd_log(SLOG2_CRITICAL, "name_attach(\"%s\") failed: %s (already running?)", VG_SERVICE_NAME, strerror(errno));
         return 1;
     }
     g_engine_chid = attach->chid;
@@ -541,17 +510,16 @@ int main(int argc, char **argv)
     sigaction(SIGTERM, &sa, NULL);
 
     pthread_t t_res, t_ing, t_http;
-    lkd_spawn(&t_res, g_opt.prio_resmgr, "lk-resmgr", lkd_resmgr_thread);
-    lkd_spawn(&t_ing, g_opt.prio_ingest, "lk-ingest", lkd_ingest_thread);
+    vgd_spawn(&t_res, g_opt.prio_resmgr, "vg-resmgr", vgd_resmgr_thread);
+    vgd_spawn(&t_ing, g_opt.prio_ingest, "vg-ingest", vgd_ingest_thread);
     if (g_opt.http_port > 0) {
-        lkd_spawn(&t_http, g_opt.prio_http, "lk-http", lkd_http_thread);
+        vgd_spawn(&t_http, g_opt.prio_http, "vg-http", vgd_http_thread);
     }
 
     if (set_self_priority(g_opt.prio_engine) != 0) {
-        lkd_log(SLOG2_WARNING, "cannot run the engine at SCHED_FIFO priority %d: %s",
-                g_opt.prio_engine, strerror(errno));
+        vgd_log(SLOG2_WARNING, "cannot run the engine at SCHED_FIFO priority %d: %s", g_opt.prio_engine, strerror(errno));
     }
-    pthread_setname_np(pthread_self(), "lk-engine");
+    pthread_setname_np(pthread_self(), "vg-engine");
 
     /* Periodic timer: each expiry delivers a pulse to our own channel. */
     int self_coid = ConnectAttach(0, 0, g_engine_chid, _NTO_SIDE_CHANNEL, 0);
@@ -559,7 +527,7 @@ int main(int argc, char **argv)
     SIGEV_PULSE_INIT(&ev, self_coid, g_opt.prio_engine, VG_PULSE_TICK, 0);
     timer_t tid;
     if (self_coid == -1 || timer_create(CLOCK_MONOTONIC, &ev, &tid) == -1) {
-        lkd_log(SLOG2_CRITICAL, "cannot create the engine timer: %s", strerror(errno));
+        vgd_log(SLOG2_CRITICAL, "cannot create the engine timer: %s", strerror(errno));
         return 1;
     }
     struct itimerspec its;
@@ -567,15 +535,14 @@ int main(int argc, char **argv)
     its.it_value.tv_nsec = (long)(g_opt.period_ms % 1000u) * 1000000L;
     its.it_interval = its.it_value;
     const uint64_t period_ns = (uint64_t)g_opt.period_ms * 1000000ull;
-    const uint64_t t_start_ns = lkd_now_ns();
+    const uint64_t t_start_ns = vgd_now_ns();
     if (timer_settime(tid, 0, &its, NULL) == -1) {
-        lkd_log(SLOG2_CRITICAL, "timer_settime failed: %s", strerror(errno));
+        vgd_log(SLOG2_CRITICAL, "timer_settime failed: %s", strerror(errno));
         return 1;
     }
 
-    lkd_log(SLOG2_NOTICE, "started: udp %d, http %d, period %u ms, engine priority %d, devices %s",
-            g_opt.udp_port, g_opt.http_port, g_opt.period_ms, g_opt.prio_engine,
-            g_opt.dev_prefix);
+    vgd_log(SLOG2_NOTICE, "started: udp %d, http %d, period %u ms, engine priority %d, devices %s", g_opt.udp_port,
+            g_opt.http_port, g_opt.period_ms, g_opt.prio_engine, g_opt.dev_prefix);
     engine_loop(attach, period_ns, t_start_ns);
 
     timer_delete(tid);

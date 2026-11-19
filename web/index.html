@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vigil</title>
+<style>
+  /* A quiet ward: ink, hairlines, one signal colour per priority. */
+  :root {
+    --ink: #0b0e11; --paper: #d9d4c7; --dim: #7d8388; --faint: #2a3036; --line: #1a1f24;
+    --sea: #8fb4c4; --amber: #e2a93b; --red: #e5584b; --calm: #79a58a;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  :root[data-theme="day"] {
+    --ink: #f1eee6; --paper: #1b1f23; --dim: #6b7076; --faint: #cdc8ba; --line: #ddd8ca;
+    --sea: #2f6b86; --amber: #b07a0c; --red: #b8372c; --calm: #3f7b58;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--ink); color: var(--paper); font: 15px/1.5 var(--serif); }
+  main { max-width: 1280px; margin: 0 auto; padding: 30px 44px 36px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .mark { font: 600 12px var(--mono); letter-spacing: .42em; color: var(--dim); }
+  .mark b { color: var(--paper); font-weight: 600; }
+  #word { font: italic 400 52px/1 var(--serif); letter-spacing: -.01em; margin-top: 18px; }
+  #word.clear { color: var(--calm); } #word.low { color: var(--sea); } #word.medium { color: var(--amber); } #word.high { color: var(--red); }
+  #summary { font: 12px var(--mono); color: var(--dim); text-align: right; line-height: 1.7; letter-spacing: .04em; }
+  #audio { color: var(--amber); }
+  .label { font: 600 10.5px var(--mono); letter-spacing: .3em; text-transform: uppercase; color: var(--dim); margin: 36px 0 10px; }
+  .bed { display: grid; grid-template-columns: 110px repeat(5, minmax(86px, 1fr)) 96px; gap: 8px 18px; align-items: end;
+         padding: 16px 0 14px; border-top: 1px solid var(--line); }
+  .bed:first-of-type { border-top-color: var(--faint); }
+  .bed.offline { opacity: .55; }
+  .id .n { font: 400 34px/1 var(--serif); }
+  .id .s { font: 600 10px var(--mono); letter-spacing: .2em; margin-top: 6px; color: var(--dim); }
+  .bed.low .s { color: var(--sea); } .bed.medium .s { color: var(--amber); } .bed.high .s { color: var(--red); }
+  .v .k { font: 10px var(--mono); letter-spacing: .18em; color: var(--dim); text-transform: uppercase; }
+  .v .x { font: 400 30px/1.15 var(--mono); }
+  .v .x small { font-size: 12px; color: var(--dim); margin-left: 4px; }
+  .v.low .x { color: var(--sea); } .v.medium .x { color: var(--amber); } .v.high .x { color: var(--red); }
+  .v.stale .x { color: var(--faint); } .v .why { font: italic 12px var(--serif); color: var(--amber); min-height: 16px; }
+  svg.sp { display: block; width: 100%; height: 22px; margin-top: 2px; }
+  svg.sp polyline { fill: none; stroke: var(--dim); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .v.low svg.sp polyline { stroke: var(--sea); } .v.medium svg.sp polyline { stroke: var(--amber); } .v.high svg.sp polyline { stroke: var(--red); }
+  .score { text-align: right; }
+  .score .k { font: 10px var(--mono); letter-spacing: .18em; color: var(--dim); }
+  .score .x { font: italic 400 40px/1 var(--serif); }
+  .score .b { font: 10px var(--mono); letter-spacing: .14em; color: var(--dim); margin-top: 4px; }
+  .score.low .x { color: var(--sea); } .score.medium .x { color: var(--amber); } .score.high .x { color: var(--red); }
+  .alarm { padding: 12px 0 13px; border-top: 1px solid var(--line); display: flex; gap: 20px; align-items: baseline; flex-wrap: wrap; }
+  .alarm .p { font: 600 10.5px var(--mono); letter-spacing: .2em; width: 70px; }
+  .alarm.low .p { color: var(--sea); } .alarm.medium .p { color: var(--amber); } .alarm.high .p { color: var(--red); }
+  .alarm .t { font-size: 22px; } .alarm .d { font: italic 14px var(--serif); color: var(--dim); }
+  .none { color: var(--dim); font-style: italic; }
+  .health { display: flex; gap: 34px; flex-wrap: wrap; }
+  .health b { display: block; font: 400 17px var(--mono); } .health span { font: 10px var(--mono); color: var(--dim); letter-spacing: .14em; text-transform: uppercase; }
+  .foot { margin-top: 30px; font: 11px var(--mono); color: var(--dim); letter-spacing: .06em; }
+  #conn { font: 11px var(--mono); color: var(--amber); letter-spacing: .08em; }
+  @media (max-width: 900px) { main { padding: 22px 18px; } .bed { grid-template-columns: repeat(3, 1fr); } .id { grid-column: 1 / -1; display: flex; gap: 14px; align-items: baseline; } .score { text-align: left; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><div class="mark">VI<b>GIL</b></div><div id="word" class="clear">&nbsp;</div></div>
+    <div id="summary"></div>
+  </header>
+  <div id="conn"></div>
+  <p class="label">Beds</p>
+  <div id="beds"></div>
+  <p class="label">Alarms</p>
+  <div id="alarms"></div>
+  <div id="healthcard"><p class="label">Engine</p><div class="health" id="health"></div></div>
+  <div class="foot">illustrative software, not a medical device &middot; NEWS2 after the Royal College of Physicians (2017) &middot; priorities after IEC 60601-1-8</div>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+if (q.get("theme") === "day") document.documentElement.dataset.theme = "day";
+if (q.get("clean") === "1") $("healthcard").style.display = "none"; // hide timing figures (licence: no performance claims)
+
+// key, label, unit, decimals, minimum sparkline span (so stable noise stays visually flat)
+const PARAMS = [["hr", "HR", "bpm", 0, 30], ["spo2", "SpO2", "%", 0, 10], ["rr", "RR", "/min", 0, 14], ["sbp", "SBP", "mmHg", 0, 40], ["temp", "TEMP", "°C", 1, 2]];
+const hist = {}; // "bed:param" -> recent values
+let pic = null, source = "";
+const cls = (l) => (l || "none").toLowerCase();
+const fmt = (v, d) => (v === null || v === undefined ? "—" : v.toFixed(d));
+function el(tag, c, text) { const e = document.createElement(tag); if (c) e.className = c; if (text !== undefined) e.textContent = text; return e; }
+
+function spark(key, minSpan) {
+  const NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", "sp"); svg.setAttribute("viewBox", "0 0 100 22"); svg.setAttribute("preserveAspectRatio", "none");
+  const h = hist[key] || [], vs = h.filter((v) => v !== null);
+  if (vs.length > 1) {
+    const mn = Math.min(...vs), mx = Math.max(...vs), span = Math.max(mx - mn, minSpan), lo = (mx + mn) / 2 - span / 2;
+    const pts = h.map((v, i) => v === null ? null : (i / (h.length - 1) * 100).toFixed(1) + "," + (20 - (v - lo) / span * 18).toFixed(1)).filter(Boolean);
+    const pl = document.createElementNS(NS, "polyline"); pl.setAttribute("points", pts.join(" ")); svg.append(pl);
+  }
+  return svg;
+}
+
+function alarmText(b, a) {
+  const p = PARAMS.find((x) => x[1] === a.src);
+  if (p) return [`${a.src} ${fmt(b[p[0]], p[3])} ${p[2]}`, ""];
+  if (a.src === "NEWS2") return ["NEWS2 score " + (b.news2 ? b.news2.total : "?"), b.news2 ? b.news2.band.toLowerCase() + " clinical risk: request a clinical review" : ""];
+  if (a.src === "SENSOR") return ["Sensor not delivering", (b.stale || []).join(", ") + " not judged until it returns"];
+  return ["No data from this bed", Math.round(b.age_ms / 1000) + " s of silence"];
+}
+
+function render() {
+  if (!pic) return;
+  const w = $("word"), top = pic.highest;
+  w.className = top === "NONE" ? "clear" : cls(top);
+  w.textContent = top === "NONE" ? "Stable" : top === "HIGH" ? "Urgent" : top === "MEDIUM" ? "Attention" : "Aware";
+  const parts = [];
+  if (pic.n_high) parts.push(pic.n_high + " high");
+  if (pic.n_medium) parts.push(pic.n_medium + " medium");
+  if (pic.n_low) parts.push(pic.n_low + " low");
+  $("summary").replaceChildren(document.createTextNode(parts.length ? parts.join("  ·  ") : "no active alarms"), el("br"), document.createTextNode(source));
+  if (pic.audio.paused) { const a = el("div", "", "audio paused " + pic.audio.remaining_s + " s (visual alarms unaffected)"); a.id = "audio"; $("summary").append(a); }
+
+  const box = $("beds"); box.replaceChildren();
+  for (const b of pic.beds) {
+    const lvl = cls(b.level), row = el("div", "bed " + (b.online ? lvl : "offline"));
+    const id = el("div", "id"); id.append(el("div", "n", String(b.bed).padStart(2, "0")),
+      el("div", "s", !b.online ? "NO DATA" : b.level === "NONE" ? "STABLE" : b.level + (b.audible ? " ♪" : "")));
+    row.append(id);
+    for (const [k, lab, unit, d, minSpan] of PARAMS) {
+      const key = b.bed + ":" + k, h = (hist[key] = hist[key] || []);
+      h.push(b[k] === undefined ? null : b[k]); if (h.length > 90) h.shift();
+      const stale = (b.stale || []).includes(lab), alarm = (b.alarms || []).find((a) => a.src === lab);
+      const v = el("div", "v " + (stale || !b.online ? "stale" : cls(alarm && alarm.level)));
+      v.append(el("div", "k", lab));
+      const x = el("div", "x", fmt(b[k], d)); if (b[k] !== null && b.online) x.append(el("small", "", unit)); v.append(x);
+      v.append(el("div", "why", stale ? "sensor off" : ""), spark(key, minSpan));
+      row.append(v);
+    }
+    const n = b.news2, sc = el("div", "score " + (n ? ({ HIGH: "high", MEDIUM: "medium", "LOW-MEDIUM": "low" }[n.band] || "") : ""));
+    sc.append(el("div", "k", "NEWS2"), el("div", "x", n ? String(n.total) : "—"), el("div", "b", n ? n.band : "NOT SCORED"));
+    row.append(sc); box.append(row);
+  }
+
+  const al = $("alarms"); al.replaceChildren();
+  const order = { HIGH: 3, MEDIUM: 2, LOW: 1 }, rows = [];
+  for (const b of pic.beds) for (const a of b.alarms || []) rows.push([b, a]);
+  rows.sort((x, y) => order[y[1].level] - order[x[1].level] || x[0].bed - y[0].bed);
+  if (!rows.length) al.append(el("div", "none", "Nothing needs attention."));
+  for (const [b, a] of rows) {
+    const [t, d] = alarmText(b, a), r = el("div", "alarm " + cls(a.level));
+    r.append(el("div", "p", a.level), el("div", "t", "Bed " + b.bed + " — " + t)); if (d) r.append(el("div", "d", d)); al.append(r);
+  }
+
+  const h = pic.health, hl = $("health"); hl.replaceChildren();
+  const live = h.cycles > 0, us = (v) => (live ? v + " µs" : "—");
+  for (const [v, l] of [[live ? h.period_us / 1000 + " ms" : "—", "period"], [us(h.last_cycle_us), "cycle"], [live ? String(h.overruns) : "—", "missed deadlines"],
+                        [us(h.last_latency_us), "wake latency"], [String(h.samples), "frames"], [String(h.bad_frames), "rejected"]]) {
+    const d = el("div"); d.append(el("b", "", v), el("span", "", l)); hl.append(d);
+  }
+}
+
+function show(p) { pic = p; $("conn").textContent = ""; render(); }
+async function poll() {
+  try { const r = await fetch("/api/picture", { cache: "no-store" }); if (!r.ok) throw new Error("HTTP " + r.status); source = "live"; show(await r.json()); }
+  catch (e) { $("conn").textContent = "VIGILD NOT REACHABLE"; }
+  setTimeout(poll, 500);
+}
+async function replay(url) {
+  const speed = +(q.get("speed") || 1);
+  const frames = (await (await fetch(url)).text()).split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l));
+  if (!frames.length) return;
+  source = "replay";
+  const fixed = q.get("frame");
+  if (fixed !== null) { const n = Math.min(frames.length - 1, Math.max(0, +fixed)); for (let i = Math.max(0, n - 60); i <= n; i++) show(frames[i]); return; }
+  let i = 0; const tick = () => { show(frames[i]); i = (i + 1) % frames.length; setTimeout(tick, 250 / speed); }; tick();
+}
+const src = q.get("src");
+if (src) replay(src); else poll();
+</script>
+</body>
+</html>

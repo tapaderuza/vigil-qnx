@@ -32,7 +32,7 @@
 #define HTTP_REQ_MAX 4096
 #define HTTP_BODY_MAX (256 * 1024)
 
-static lkd_pub_t  g_snap;
+static vgd_pub_t  g_snap;
 static vg_event_t g_events[VG_EVENT_RING];
 static char       g_body[HTTP_BODY_MAX];
 
@@ -105,16 +105,16 @@ static void serve(int fd)
         return;
     }
 
-    lkd_pub_snapshot(&g_snap);
+    vgd_pub_snapshot(&g_snap);
     size_t n;
     if (strcmp(path, "/api/picture") == 0) {
         n = vg_render_json(&g_snap.pic, &g_snap.cfg, g_body, sizeof(g_body));
         respond(fd, 200, "OK", "application/json", g_body, n);
     } else if (strcmp(path, "/api/stats") == 0) {
-        n = vg_render_stats(&g_snap.pic, &g_snap.cfg, g_body, sizeof(g_body));
+        n = vg_render_stats(&g_snap.pic, g_body, sizeof(g_body));
         respond(fd, 200, "OK", "text/plain; charset=utf-8", g_body, n);
     } else if (strcmp(path, "/api/alarms") == 0) {
-        n = vg_render_alarms(&g_snap.pic, g_body, sizeof(g_body));
+        n = vg_render_alarms(&g_snap.pic, &g_snap.cfg, g_body, sizeof(g_body));
         respond(fd, 200, "OK", "text/plain; charset=utf-8", g_body, n);
     } else if (strcmp(path, "/api/events") == 0) {
         uint32_t ne = vg_events_since(&g_snap.events, 0, g_events, VG_EVENT_RING, NULL);
@@ -125,12 +125,12 @@ static void serve(int fd)
     }
 }
 
-void *lkd_http_thread(void *arg)
+void *vgd_http_thread(void *arg)
 {
     (void)arg;
     int ls = socket(AF_INET, SOCK_STREAM, 0);
     if (ls == -1) {
-        lkd_log(SLOG2_ERROR, "http: socket(): %s", strerror(errno));
+        vgd_log(SLOG2_ERROR, "http: socket(): %s", strerror(errno));
         return NULL;
     }
     int one = 1;
@@ -141,17 +141,17 @@ void *lkd_http_thread(void *arg)
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)g_opt.http_port);
     if (inet_pton(AF_INET, g_opt.http_bind, &addr.sin_addr) != 1) {
-        lkd_log(SLOG2_ERROR, "http: bad bind address '%s'", g_opt.http_bind);
+        vgd_log(SLOG2_ERROR, "http: bad bind address '%s'", g_opt.http_bind);
         close(ls);
         return NULL;
     }
     if (bind(ls, (struct sockaddr *)&addr, sizeof(addr)) == -1 || listen(ls, 8) == -1) {
-        lkd_log(SLOG2_ERROR, "http: cannot listen on %s:%d: %s", g_opt.http_bind,
+        vgd_log(SLOG2_ERROR, "http: cannot listen on %s:%d: %s", g_opt.http_bind,
                 g_opt.http_port, strerror(errno));
         close(ls);
         return NULL;
     }
-    lkd_log(SLOG2_INFO, "http: dashboard on http://%s:%d/", g_opt.http_bind, g_opt.http_port);
+    vgd_log(SLOG2_INFO, "http: dashboard on http://%s:%d/", g_opt.http_bind, g_opt.http_port);
 
     for (;;) {
         int fd = accept(ls, NULL, NULL);

@@ -2,11 +2,12 @@
  * vigil-ctl - talk to vigild with native QNX message passing.
  *
  *   vigil-ctl stats            counters, cycle time, timer-wake latency
- *   vigil-ctl alarms           active alarms with COLREGs advice
- *   vigil-ctl tracks           every vessel, most urgent first
- *   vigil-ctl config           thresholds
+ *   vigil-ctl alarms           active alarms by priority, technical alarms, audio pause
+ *   vigil-ctl beds             every bed: vitals, NEWS2 score, state
+ *   vigil-ctl config           alarm limits and delays
  *   vigil-ctl events [SEQ]     alarm transitions after sequence number SEQ
- *   vigil-ctl set "key value"  change a threshold, e.g. "warn_cpa_nm 2"
+ *   vigil-ctl set "key value"  change a limit, e.g. "hr_high_med 110"
+ *   vigil-ctl pause | resume   audio pause (visual alarms are never paused)
  *   vigil-ctl reset            reset the max-latency / max-cycle statistics
  *
  * It finds the daemon by name (name_open) and sends it synchronous messages;
@@ -81,7 +82,7 @@ static int set_config(int coid, const char *line)
 
 static int usage(void)
 {
-    fprintf(stderr, "usage: vigil-ctl stats|alarms|tracks|config|reset\n"
+    fprintf(stderr, "usage: vigil-ctl stats|alarms|beds|config|reset|pause|resume\n"
                     "       vigil-ctl events [SEQ]\n"
                     "       vigil-ctl set \"warn_cpa_nm 2\"\n");
     return 2;
@@ -103,8 +104,8 @@ int main(int argc, char **argv)
         rc = get_text(coid, VG_TEXT_STATS);
     } else if (strcmp(argv[1], "alarms") == 0) {
         rc = get_text(coid, VG_TEXT_ALARMS);
-    } else if (strcmp(argv[1], "tracks") == 0) {
-        rc = get_text(coid, VG_TEXT_TRACKS);
+    } else if (strcmp(argv[1], "beds") == 0) {
+        rc = get_text(coid, VG_TEXT_BEDS);
     } else if (strcmp(argv[1], "config") == 0) {
         rc = get_text(coid, VG_TEXT_CONFIG);
     } else if (strcmp(argv[1], "events") == 0) {
@@ -113,6 +114,10 @@ int main(int argc, char **argv)
         rc = set_config(coid, argv[2]);
     } else if (strcmp(argv[1], "reset") == 0) {
         rc = set_config(coid, "reset_stats 1");
+    } else if (strcmp(argv[1], "pause") == 0) {
+        rc = set_config(coid, "pause 1");
+    } else if (strcmp(argv[1], "resume") == 0) {
+        rc = set_config(coid, "resume 1");
     } else {
         rc = usage();
     }

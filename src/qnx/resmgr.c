@@ -1,12 +1,12 @@
 /*
  * vigild resource manager: the picture as files under /dev/vigil.
  *
- *   cat /dev/vigil/tracks    every vessel, most urgent first
- *   cat /dev/vigil/alarms    current WARNING / DANGER list with COLREGs advice
+ *   cat /dev/vigil/beds      every bed: vitals, NEWS2, state
+ *   cat /dev/vigil/alarms    active alarms by priority, technical alarms, audio pause
  *   cat /dev/vigil/stats     counters, cycle time and timer-wake latency
  *   cat /dev/vigil/events    recent alarm transitions
  *   cat /dev/vigil/config    alarm thresholds
- *   echo "warn_cpa_nm 2" > /dev/vigil/config      (also: reset_stats 1)
+ *   echo "hr_high_med 110" > /dev/vigil/config   (also: pause 1, resume 1, reset_stats 1)
  *
  * Any tool that can read a file now speaks to the engine. Each open() reads a
  * snapshot taken when the client reads offset 0, so a `cat` of a table that
@@ -31,13 +31,13 @@
 
 #define VG_RM_TEXT 65536
 
-enum { K_TRACKS, K_ALARMS, K_STATS, K_EVENTS, K_CONFIG, K_COUNT };
+enum { K_BEDS, K_ALARMS, K_STATS, K_EVENTS, K_CONFIG, K_COUNT };
 
 static const struct {
     const char *name;
     mode_t      mode;
 } k_dev[K_COUNT] = {
-    { "tracks", 0444 }, { "alarms", 0444 }, { "stats", 0444 }, { "events", 0444 },
+    { "beds", 0444 }, { "alarms", 0444 }, { "stats", 0444 }, { "events", 0444 },
     { "config", 0644 },
 };
 
@@ -49,7 +49,7 @@ typedef struct {
 static vg_attr_t  g_attr[K_COUNT];
 static char       g_text[K_COUNT][VG_RM_TEXT];
 static size_t     g_len[K_COUNT];
-static lkd_pub_t  g_snap;
+static vgd_pub_t  g_snap;
 static vg_event_t g_events[VG_EVENT_RING];
 static int        g_engine_coid = -1;
 
@@ -58,17 +58,17 @@ static void render(int kind)
     if (kind < 0 || kind >= K_COUNT) {
         return;
     }
-    lkd_pub_snapshot(&g_snap);
+    vgd_pub_snapshot(&g_snap);
     char *buf = g_text[kind];
     switch (kind) {
-    case K_TRACKS:
-        g_len[kind] = vg_render_tracks(&g_snap.pic, buf, VG_RM_TEXT);
+    case K_BEDS:
+        g_len[kind] = vg_render_beds(&g_snap.pic, buf, VG_RM_TEXT);
         break;
     case K_ALARMS:
-        g_len[kind] = vg_render_alarms(&g_snap.pic, buf, VG_RM_TEXT);
+        g_len[kind] = vg_render_alarms(&g_snap.pic, &g_snap.cfg, buf, VG_RM_TEXT);
         break;
     case K_STATS:
-        g_len[kind] = vg_render_stats(&g_snap.pic, &g_snap.cfg, buf, VG_RM_TEXT);
+        g_len[kind] = vg_render_stats(&g_snap.pic, buf, VG_RM_TEXT);
         break;
     case K_EVENTS: {
         uint32_t n = vg_events_since(&g_snap.events, 0, g_events, VG_EVENT_RING, NULL);
@@ -151,17 +151,17 @@ static int io_write(resmgr_context_t *ctp, io_write_t *msg, RESMGR_OCB_T *ocb)
     return _RESMGR_NPARTS(0);
 }
 
-void *lkd_resmgr_thread(void *arg)
+void *vgd_resmgr_thread(void *arg)
 {
     (void)arg;
     dispatch_t *dpp = dispatch_create();
     if (dpp == NULL) {
-        lkd_log(SLOG2_CRITICAL, "resmgr: dispatch_create: %s", strerror(errno));
+        vgd_log(SLOG2_CRITICAL, "resmgr: dispatch_create: %s", strerror(errno));
         return NULL;
     }
     g_engine_coid = ConnectAttach(0, 0, g_engine_chid, _NTO_SIDE_CHANNEL, 0);
     if (g_engine_coid == -1) {
-        lkd_log(SLOG2_CRITICAL, "resmgr: cannot connect to the engine: %s", strerror(errno));
+        vgd_log(SLOG2_CRITICAL, "resmgr: cannot connect to the engine: %s", strerror(errno));
         return NULL;
     }
 
@@ -183,22 +183,22 @@ void *lkd_resmgr_thread(void *arg)
         g_attr[k].kind = k;
         if (resmgr_attach(dpp, &rattr, path, _FTYPE_ANY, 0, &connect_funcs, &io_funcs,
                           &g_attr[k].base) == -1) {
-            lkd_log(SLOG2_CRITICAL, "resmgr: cannot attach %s: %s", path, strerror(errno));
+            vgd_log(SLOG2_CRITICAL, "resmgr: cannot attach %s: %s", path, strerror(errno));
             return NULL;
         }
     }
-    lkd_log(SLOG2_INFO, "resmgr: serving %s/{tracks,alarms,stats,events,config}",
+    vgd_log(SLOG2_INFO, "resmgr: serving %s/{beds,alarms,stats,events,config}",
             g_opt.dev_prefix);
 
     dispatch_context_t *ctp = dispatch_context_alloc(dpp);
     if (ctp == NULL) {
-        lkd_log(SLOG2_CRITICAL, "resmgr: dispatch_context_alloc: %s", strerror(errno));
+        vgd_log(SLOG2_CRITICAL, "resmgr: dispatch_context_alloc: %s", strerror(errno));
         return NULL;
     }
     for (;;) {
         ctp = dispatch_block(ctp);
         if (ctp == NULL) {
-            lkd_log(SLOG2_ERROR, "resmgr: dispatch_block: %s", strerror(errno));
+            vgd_log(SLOG2_ERROR, "resmgr: dispatch_block: %s", strerror(errno));
             return NULL;
         }
         dispatch_handler(ctp);
