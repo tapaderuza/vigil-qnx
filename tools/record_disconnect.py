@@ -40,10 +40,10 @@ def main():
         page.evaluate(f"document.body.style.zoom={a.zoom}")
         page.wait_for_timeout(int(a.live_s * 1000))
         marks["cut"] = time.monotonic() - t0
-        subprocess.run(a.cut, shell=True, check=False)
+        subprocess.Popen(a.cut, shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x208)
         page.wait_for_timeout(int(a.down_s * 1000))
         marks["restore"] = time.monotonic() - t0
-        subprocess.run(a.restore, shell=True, check=False)
+        subprocess.Popen(a.restore, shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=0x208)
         page.wait_for_timeout(int(a.after_s * 1000))
         marks["end"] = time.monotonic() - t0
         vid = page.video

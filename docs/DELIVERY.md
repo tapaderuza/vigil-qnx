@@ -48,8 +48,9 @@ aside and counted.
 
 Scenario `burst8`: eight beds cross HR, SpO2, RR, SBP and TEMP limits together and NEWS2 follows, so 8 beds x 6
 sources = 48 transitions are decided in a single engine cycle (then 40 on recovery and 8 NEWS2 releases later: 96 in
-all). `VG_MAX_TRANSITIONS` (beds x sources) sizes the buffer that `vigild` and `vg-replay` pass to `vg_engine_step`;
-the public version used 32 and 64, and the engine drops what does not fit. The unit test
+all). `VG_MAX_TRANSITIONS` (beds x sources) sizes the buffer that `vigild` and `vg-replay` pass to `vg_engine_step`; it is 64
+(8 beds x 8 sources: five vital signs, NEWS2, sensor, offline). The public version used 32 and 64, and the engine
+drops what does not fit. The unit test
 `test_one_cycle_can_report_every_bed_and_source` uses that same constant and fails if it is below 48.
 
 ```bash
@@ -60,6 +61,18 @@ The report compares three lists by identity (bed, source, previous and new state
 the daemon's own history (`/dev/vigil/events`) and what `vigil-watch` fetched. It counts events, not pulses (one pulse
 can announce several), lists missing and duplicated events, and sets aside what happens after the sender stops.
 Whether UDP puts all 48 in one cycle is measured, not assumed: the report prints the events per cycle.
+
+### Second case: 48 closures and 8 sensor warnings in one cycle
+
+Scenario `burst8close`: the eight beds hold six alarms each, then every sensor goes quiet together. Once the values
+are older than `sensor_s`, the engine closes the six alarms of each bed (48) and raises each bed's sensor warning (8)
+in the same cycle: 56 transitions, then 16 more (offline raised, sensor warning ended) 5 s later. The unit test
+`test_one_cycle_can_close_48_alarms_and_raise_8_sensor_warnings` uses the daemon's buffer; the replay expectation
+needs the tail of the run, so the QNX trial passes `EXPECT_TAIL`:
+
+```bash
+SCENARIO=burst8close SCEN_SECONDS=0 EXPECT_TAIL=15 WATCH_IDLE=40 UDP_PORT=10110 bash scripts/qnx-delivery.sh
+```
 
 ## Run it
 
@@ -85,7 +98,8 @@ It builds, deploys, runs the trial idle and then with `vigil-load` (two SCHED_FI
 * Host: instrumentation, report tool and their tests pass (`make test`).
 * QNX 8.0 under QEMU (x86_64, KVM, 2 vCPUs, user-mode networking): the trial ran on 2026-11-19; every expected
   transition was received, in order, idle and loaded, none lost (15 of 15). `burst8`: 96 of 96, 48 of them decided in
-  one engine cycle, no duplicates, history and `vigil-watch` agree with the expected list.
+  one engine cycle; `burst8close`: 120 of 120, 56 of them in one cycle (48 closures, 8 sensor warnings). No duplicates,
+  no losses; history and `vigil-watch` agree with the expected list by identity (bed, source, previous, new).
 * **Numbers are not published.** QNX's non-commercial licence (section 4.6(i)) requires written approval to
   publish performance results; the organisers' answer in the forum thread is still pending. Until it arrives,
   public materials describe the method and say a run passed or failed, not how fast. A run describes only that

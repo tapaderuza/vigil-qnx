@@ -3,7 +3,7 @@
 Cierre: 15 dic 2026, 20:00 hora de España (14:00 ET).
 
 ## Hecho (19 nov 2026)
-- Vigil compila y pasa los tests en QNX 8.0 (QEMU): 145 comprobaciones del núcleo, 32 pruebas del simulador y 11 del panel.
+- Vigil compila y pasa los tests en QNX 8.0 (QEMU): 149 comprobaciones del núcleo, 34 pruebas del simulador y 11 del panel.
 - Repo público (MIT): https://github.com/tapaderuza/vigil-qnx
 - Vídeo público en YouTube (2:04): https://youtu.be/HCqk-A5qG0I
 - Devpost: proyecto "Vigil" ENVIADO (Submitted, 5/5), editable hasta el cierre.

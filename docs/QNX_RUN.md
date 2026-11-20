@@ -7,7 +7,7 @@ Guest: `QNX noname 8.0.0 2026/10/30-09:10:05EDT x86pc x86_64`.
 | Step | Result |
 |---|---|
 | `make qnx QNX_ARCH=x86_64` (`-Werror`) | all six binaries build: vigild, vigil-ctl, vigil-watch, vigil-load, test_core, vg-replay |
-| `test_core` executed ON QNX | 145 checks, 0 failures |
+| `test_core` executed ON QNX | 149 checks, 0 failures |
 | `vigild` start | engine (priority 40), resource manager (25), ingest UDP (20), HTTP 8080 (10); five devices under `/dev/vigil` |
 | `ward` scenario streamed over UDP | 6905 frames, 0 rejected; bed 2 desaturation raised and cleared, bed 1 NEWS2 escalates to HIGH, bed 3 probe-off as a technical alarm, bed 4 reported offline |
 | `vigil-watch` (secure event + pulse) | received the transitions without polling |

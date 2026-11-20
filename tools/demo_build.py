@@ -117,10 +117,13 @@ def assemble(slides, out_mp4, tmp):
     tmp.mkdir(parents=True, exist_ok=True)
     lst = []
     for i, (im, secs) in enumerate(slides):
-        p = tmp / f"s{i:02d}.png"
-        im.save(p)
         c = tmp / f"s{i:02d}.mp4"
-        clip(p, secs, c)
+        if isinstance(im, Path):                      # a ready-made 1920x1080 30 fps clip of `secs` seconds
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(im), "-c", "copy", str(c)], check=True)
+        else:
+            p = tmp / f"s{i:02d}.png"
+            im.save(p)
+            clip(p, secs, c)
         lst.append(f"file '{c.resolve().as_posix()}'")
     (tmp / "list.txt").write_text("\n".join(lst) + "\n")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(tmp / "list.txt"),
