@@ -48,6 +48,9 @@ UDP_PORT=10110 bash scripts/qnx-delivery.sh     # 1:45; writes out/delivery/<sta
 
 ## Status
 
-Not recorded. The video and the four images need a screen capture, which is left to the owner. The script, the steps
-and the captions are ready; the scenes marked QNX were exercised during development (`docs/QNX_RUN.md`,
-`docs/DELIVERY.md`) but no footage exists yet.
+Recorded on 2026-11-20 from one QNX 8.0 run (QEMU/KVM in WSL2): the panel at `http://127.0.0.1:8080/?clean=1` (the
+`clean` switch hides the engine-timing card so no timing figure appears), `vigil-watch`, the 8-bed integrity case and
+the codelab example. `tools/demo_build.py --dir out/demo` renders the MP4 (about 1:49, no audio) and the four 3:2
+gallery images from those captures; terminal text is rendered from captured output, not retyped. The 3 min 26 s lead
+is scenario (simulated) time, from replaying the same frames; the live feed ran about 4 % slower than real time, so
+the daemon's wall-clock gap on that run was longer. Latency figures stay out of every public asset.

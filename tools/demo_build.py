@@ -121,7 +121,7 @@ def assemble(slides, out_mp4, tmp):
         im.save(p)
         c = tmp / f"s{i:02d}.mp4"
         clip(p, secs, c)
-        lst.append(f"file '{c.as_posix()}'")
+        lst.append(f"file '{c.resolve().as_posix()}'")
     (tmp / "list.txt").write_text("\n".join(lst) + "\n")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(tmp / "list.txt"),
                     "-c", "copy", str(out_mp4)], check=True)
