@@ -70,3 +70,14 @@ def test_stale_transitions_after_the_sender_stopped_are_set_aside():
                                  90_000_100_000, 90_000_300_000, 1, 1)
     r = dr.analyse(dr.expected_from(EXPECTED), dr.parse_run(text), first_expected_s=11.1, duration_s=20.0)
     assert not r["extra"] and r["same_order"] and len(r["after_sender_stopped"]) == 1
+
+
+def test_history_and_duplicates_are_compared():
+    hist = ("#1 t=11.1s bed 1 SpO2    NONE -> HIGH  value 84\n#2 t=11.1s bed 1 NEWS2   NONE -> LOW\n"
+            "#3 t=16.1s bed 2 SENSOR  NONE -> MEDIUM\n#4 t=90.0s bed 2 OFFLINE NONE -> MEDIUM\n")
+    r = dr.analyse(dr.expected_from(EXPECTED), dr.parse_run(run_text()), 11.1, 20.0, dr.parse_history(hist))
+    assert r["history"]["missing"] == [] and r["history"]["extra"] == [] and r["history"]["after_sender_stopped"] == 1
+    assert r["duplicates_by_seq"] == 0 and r["largest_cycle_batch"] == 2
+    twice = run_text() + "\n" + m(1, 1, "SpO2", "NONE", "HIGH", 8100, 11100, 1_000_000_000, 1_000_050_000, 1_000_200_000,
+                                  1_000_500_000, 2, 2)
+    assert dr.analyse(dr.expected_from(EXPECTED), dr.parse_run(twice))["duplicates_by_seq"] == 1

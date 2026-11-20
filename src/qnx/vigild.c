@@ -168,8 +168,8 @@ static void on_tick(uint64_t tick_no, uint64_t period_ns, uint64_t t_start_ns)
     const uint64_t latency_us = wake_ns > due_ns ? (wake_ns - due_ns) / 1000u : 0u;
     const uint64_t now_ms = wake_ns / 1000000u;
 
-    vg_transition_t tr[32];
-    uint32_t ntr = vg_engine_step(&g_engine, &g_beds, now_ms, &g_pic, tr, 32);
+    vg_transition_t tr[VG_MAX_TRANSITIONS];
+    uint32_t ntr = vg_engine_step(&g_engine, &g_beds, now_ms, &g_pic, tr, VG_MAX_TRANSITIONS);
 
     const uint64_t done_ns = vgd_now_ns();
     const uint32_t cycle_us = (uint32_t)((done_ns - wake_ns) / 1000u);

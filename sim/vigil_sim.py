@@ -175,8 +175,26 @@ def sc_delivery() -> Scenario:
                     [desat, probe, pair, silent], 75.0)
 
 
+def sc_burst8() -> Scenario:
+    """Integrity case: eight beds cross five limits together, so NEWS2 follows on each: 6 changes x 8 beds = 48
+    transitions that the engine decides in the same cycle (a bed's frames arrive within milliseconds of the others').
+    Everything returns to normal at t=18 s, which is another batch. No noise, so the expected list is exact."""
+    quiet = {"hr": 0.0, "spo2": 0.0, "rr": 0.0, "sbp": 0.0, "temp": 0.0}
+    beds = []
+    for i in range(1, 9):
+        p = stable(i, f"Bed {i}")
+        p.noise = dict(quiet)
+        p.traj = {"hr": [(0, 72), (7, 72), (7.01, 150), (18, 150), (18.01, 72), (70, 72)],
+                  "spo2": [(0, 97), (7, 97), (7.01, 84), (18, 84), (18.01, 97), (70, 97)],
+                  "rr": [(0, 15), (7, 15), (7.01, 32), (18, 32), (18.01, 15), (70, 15)],
+                  "sbp": [(0, 124), (7, 124), (7.01, 80), (18, 80), (18.01, 124), (70, 124)],
+                  "temp": [(0, 36.8), (7, 36.8), (7.01, 39.5), (18, 39.5), (18.01, 36.8), (70, 36.8)]}
+        beds.append(p)
+    return Scenario("burst8", "Integrity: eight beds, six changes each, decided in one engine cycle", beds, 70.0)
+
+
 SCENARIOS: Dict[str, Callable[[], Scenario]] = {
-    f.__name__[3:]: f for f in (sc_stable, sc_deterioration, sc_desat, sc_probe_off, sc_offline, sc_ward, sc_delivery)
+    f.__name__[3:]: f for f in (sc_stable, sc_deterioration, sc_desat, sc_probe_off, sc_offline, sc_ward, sc_delivery, sc_burst8)
 }
 
 

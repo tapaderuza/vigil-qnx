@@ -173,3 +173,11 @@ def test_frames_use_the_protocol_and_have_valid_checksums(name):
         _, s = ln.split(" ", 1)
         body, ck = s[1:].split("*")
         assert s.startswith("$VGVIT,") and sim.checksum(body) == ck
+
+
+def test_burst8_decides_48_transitions_in_one_engine_cycle():
+    """Eight beds x six changes. vg-replay uses the daemon's buffer (VG_MAX_TRANSITIONS), so none may be dropped."""
+    trs, _ = replay("burst8")
+    first = [x for x in trs if x.t == trs[0].t]
+    assert len(first) == 48 and {x.bed for x in first} == set(range(1, 9)) and len({(x.bed, x.src) for x in first}) == 48
+    assert len(trs) == 96

@@ -22,7 +22,10 @@ cd "$(dirname "$0")/.."
 # shellcheck disable=SC1091
 source "$QNX_SDP/qnxsdp-env.sh" > /dev/null
 
-STAMP="$(date +%Y%m%d-%H%M%S)"
+SCENARIO="${SCENARIO:-delivery}"      # delivery (default, 15 transitions) or burst8 (96 transitions, 48 in one cycle)
+SCEN_SECONDS="${SCEN_SECONDS:-75}"
+WATCH_IDLE="${WATCH_IDLE:-25}"       # seconds without an event before vigil-watch exits (burst8 needs 40)
+STAMP="$(date +%Y%m%d-%H%M%S)-$SCENARIO"
 OUT="out/delivery/$STAMP"
 mkdir -p "$OUT"
 BIN=out/qnx-x86_64
@@ -36,7 +39,7 @@ make host > /dev/null
 make qnx QNX_ARCH=x86_64 > /dev/null
 
 echo "== expected transitions: the same frames through the portable core on the host"
-python3 sim/vigil_sim.py generate delivery | out/host/vg-replay > "$OUT/expected.txt" 2> /dev/null
+python3 sim/vigil_sim.py generate "$SCENARIO" | out/host/vg-replay > "$OUT/expected.txt" 2> /dev/null
 echo "   $(grep -c '^T+' "$OUT/expected.txt") transitions expected"
 
 if ! (echo > /dev/tcp/127.0.0.1/"$SSH_PORT") 2>/dev/null; then
@@ -61,21 +64,22 @@ trial() {   # trial NAME WITH_LOAD
     if [ "$with_load" = "yes" ]; then
         vm "(/tmp/vigil-load -n $LOAD_THREADS -p $LOAD_PRIO -b $LOAD_BURST_MS -g $LOAD_GAP_MS -t 110 > /tmp/load.log 2>&1 &); sleep 1; cat /tmp/load.log"
     fi
-    vm "(on -p10 /tmp/vigil-watch -m -t 25 > /tmp/watch-$name.tsv 2> /tmp/watch-$name.err &); sleep 1"
-    python3 sim/vigil_sim.py send delivery --host 127.0.0.1 --port "$UDP_PORT" --speed 1 > /dev/null
+    vm "(on -p10 /tmp/vigil-watch -m -t $WATCH_IDLE > /tmp/watch-$name.tsv 2> /tmp/watch-$name.err &); sleep 1"
+    python3 sim/vigil_sim.py send "$SCENARIO" --host 127.0.0.1 --port "$UDP_PORT" --speed 1 > /dev/null
     for _ in $(seq 1 40); do
         vm "pidin ar" 2>/dev/null | grep -q "vigil-watch" || break
         sleep 1
     done
     vm "slay -f vigil-load; true" > /dev/null 2>&1 || true
     pull "/tmp/watch-$name.tsv" "$OUT/$name.tsv"
+    vm "cat /dev/vigil/events" > "$OUT/$name.history.txt" 2> /dev/null || true
     {
         echo "trial:      $name"
         echo "date:       $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "commit:     $(git rev-parse --short HEAD)$(git diff --quiet || echo '+uncommitted')"
         echo "guest:      $(vm uname -a)"
         echo "qemu:       $(ps -o args= -C qemu-system-x86_64 | head -1 | cut -c1-200)"
-        echo "scenario:   delivery, speed 1, UDP port $UDP_PORT, 2 virtual CPUs (QEMU -smp 2), user-mode networking"
+        echo "scenario:   $SCENARIO, speed 1, UDP port $UDP_PORT, 2 virtual CPUs (QEMU -smp 2), user-mode networking"
         echo "priorities: engine 40, resmgr 25, ingest 20, vigil-watch 10 (on -p10)"
         if [ "$with_load" = "yes" ]; then
             echo "load:       vigil-load -n $LOAD_THREADS -p $LOAD_PRIO -b $LOAD_BURST_MS -g $LOAD_GAP_MS (SCHED_FIFO $LOAD_PRIO, outranks vigil-watch)"
@@ -92,7 +96,7 @@ trial idle no
 trial loaded yes
 
 echo "== report"
-python3 tools/delivery_report.py --duration 75 --expected "$OUT/expected.txt" \
-    --run "idle=$OUT/idle.tsv" --run "loaded=$OUT/loaded.tsv" \
+python3 tools/delivery_report.py --duration "$SCEN_SECONDS" --expected "$OUT/expected.txt" \
+    --history "idle=$OUT/idle.history.txt" --history "loaded=$OUT/loaded.history.txt" --run "idle=$OUT/idle.tsv" --run "loaded=$OUT/loaded.tsv" \
     --notes "idle=$OUT/idle.txt" --notes "loaded=$OUT/loaded.txt" --out "$OUT/report" || echo "(the report flags a difference: read it)"
 echo "report: $OUT/report.md"

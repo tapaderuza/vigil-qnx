@@ -72,6 +72,28 @@ def parse_run(text: str) -> dict:
     return {"events": events, "pulses": pulses, "lost": lost, "header": header}
 
 
+HISTORY = re.compile(r"#(?P<seq>\d+) t=(?P<t>\d+\.\d)s bed (?P<bed>\d) (?P<src>\w+)\s+(?P<frm>\w+) -> (?P<to>\w+)")
+
+
+def parse_history(text: str) -> List[dict]:
+    """/dev/vigil/events of the daemon: the engine's own record, read after the run."""
+    return [{"seq": int(m["seq"]), "t": float(m["t"]), "key": Key(int(m["bed"]), m["src"], m["frm"], m["to"])}
+            for m in map(HISTORY.match, text.splitlines()) if m]
+
+
+def compare_history(expected: List[Key], hist: List[dict], first_expected_s: float, duration_s: float) -> dict:
+    if duration_s and hist:
+        end = hist[0]["t"] + (duration_s - first_expected_s)
+        after = [h for h in hist if h["t"] > end]
+        hist = [h for h in hist if h["t"] <= end]
+    else:
+        after = []
+    got, exp = Counter(h["key"] for h in hist), Counter(expected)
+    return {"in_history": len(hist), "missing": [k._asdict() for k in (exp - got).elements()],
+            "extra": [k._asdict() for k in (got - exp).elements()], "after_sender_stopped": len(after),
+            "same_order": [h["key"] for h in hist] == expected}
+
+
 def stats(values: List[float]) -> Optional[dict]:
     if not values:
         return None
@@ -80,7 +102,8 @@ def stats(values: List[float]) -> Optional[dict]:
     return {"n": len(v), "min": v[0], "median": statistics.median(v), "p95": p95, "max": v[-1]}
 
 
-def analyse(expected: List[Key], run: dict, first_expected_s: float = 0.0, duration_s: float = 0.0) -> dict:
+def analyse(expected: List[Key], run: dict, first_expected_s: float = 0.0, duration_s: float = 0.0,
+            history: Optional[List[dict]] = None) -> dict:
     """With duration_s, events decided after the sender stopped are set aside (the beds going stale is a
     consequence of the sender ending, not part of the scenario). The scenario clock is anchored on the first
     received event, which the expected list says happens at first_expected_s."""
@@ -107,7 +130,11 @@ def analyse(expected: List[Key], run: dict, first_expected_s: float = 0.0, durat
     def us(a: str, b: str) -> List[float]:
         return [(x[b] - x[a]) / 1000.0 for x in ev]
 
+    seqs = Counter(e["seq"] for e in run["events"])
     return {
+        "history": compare_history(expected, history, first_expected_s, duration_s) if history is not None else None,
+        "duplicates_by_seq": sum(c - 1 for c in seqs.values() if c > 1),
+        "largest_cycle_batch": max(batches) if batches else 0,
         "expected": len(expected), "received": len(received),
         "missing": [k._asdict() for k in missing], "extra": [k._asdict() for k in extra],
         "same_order": received == expected,
@@ -142,6 +169,14 @@ def render(expected: List[Key], results: Dict[str, dict], notes: Dict[str, str])
         out += [f"- received {r['received']} of {r['expected']} expected; in the expected order: "
                 f"{'yes' if r['same_order'] else 'NO'}",
                 f"- missing: {r['missing'] or 'none'}", f"- unexpected: {r['extra'] or 'none'}",
+                f"- duplicates received (same event sequence number twice): {r['duplicates_by_seq']}",
+                f"- largest number of events decided in one engine cycle (counted from the events, not the pulses): "
+                f"{r['largest_cycle_batch']}",
+                f"- daemon history (/dev/vigil/events) against expected: "
+                + ("not captured" if not r["history"] else
+                   f"{r['history']['in_history']} of {r['expected']}, missing {r['history']['missing'] or 'none'}, "
+                   f"extra {r['history']['extra'] or 'none'}, in order: {'yes' if r['history']['same_order'] else 'NO'}, "
+                   f"{r['history']['after_sender_stopped']} set aside after the sender stopped"),
                 f"- transitions after the sender stopped (beds going stale; set aside): {len(r['after_sender_stopped'])}",
                 f"- events the ring overwrote before the consumer read them: {r['lost_by_ring']}",
                 f"- decided -> notified (daemon side): {fmt_stats(r['decided_to_notified_us'], 'us')}",
@@ -158,6 +193,7 @@ def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--expected", required=True)
     ap.add_argument("--run", action="append", default=[], metavar="NAME=FILE")
+    ap.add_argument("--history", action="append", default=[], metavar="NAME=FILE", help="cat /dev/vigil/events")
     ap.add_argument("--notes", action="append", default=[], metavar="NAME=FILE")
     ap.add_argument("--out", default="delivery-report")
     ap.add_argument("--duration", type=float, default=0.0, help="scenario length in s; later events are set aside")
@@ -167,15 +203,17 @@ def main(argv: List[str]) -> int:
         print("no transitions found in the expected file", file=sys.stderr)
         return 2
     results = {}
+    hist = {n: parse_history(Path(p).read_text()) for n, _, p in (i.partition("=") for i in a.history)}
     for item in a.run:
         name, _, path = item.partition("=")
         results[name] = analyse(expected, parse_run(Path(path).read_text()), first_time(Path(a.expected).read_text()),
-                                a.duration)
+                                a.duration, hist.get(name))
     notes = {n: Path(p).read_text() for n, _, p in (i.partition("=") for i in a.notes)}
     Path(a.out + ".md").write_text(render(expected, results, notes) + "\n")
     Path(a.out + ".json").write_text(json.dumps({"expected": [k._asdict() for k in expected], "runs": results}, indent=2) + "\n")
     print(render(expected, results, notes))
-    bad = any(r["missing"] or r["extra"] or not r["same_order"] or r["lost_by_ring"] for r in results.values())
+    bad = any(r["missing"] or r["extra"] or not r["same_order"] or r["lost_by_ring"] or r["duplicates_by_seq"]
+              or (r["history"] and (r["history"]["missing"] or r["history"]["extra"])) for r in results.values())
     return 1 if bad else 0
 
 

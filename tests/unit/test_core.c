@@ -366,6 +366,38 @@ static void test_transition_records_the_start_of_its_confirmation_delay(void)
     CHECK(found);                                            /* SpO2 last seen at 4000, expired at 9100 (> 5 s) */
 }
 
+/* Eight beds each cross HR, SpO2, RR, SBP and TEMP limits together; NEWS2 follows: 6 sources x 8 beds = 48 transitions
+ * decided in one engine cycle. The buffer is the one the daemon and vg-replay use. */
+static void test_one_cycle_can_report_every_bed_and_source(void)
+{
+    CHECK(VG_MAX_TRANSITIONS >= 48);
+    setup();
+    vg_transition_t tr[VG_MAX_TRANSITIONS];
+    uint32_t best = 0, total = 0, steps_with_any = 0;
+    uint8_t seen[VG_MAX_BEDS + 1][VG_SRC_COUNT];
+    memset(seen, 0, sizeof seen);
+    for (uint64_t t = 0; t <= 12000; t += 100) {
+        if (t % 1000 == 0)
+            for (int b = 1; b <= VG_MAX_BEDS; b++) {
+                char f[64];
+                snprintf(f, sizeof f, "%d,150,84,32,80,39.5,A,0", b);
+                feed(f, t);
+            }
+        uint32_t n = vg_engine_step(&g_eng, &g_beds, t, &g_pic, tr, VG_MAX_TRANSITIONS);
+        if (n) steps_with_any++;
+        if (n > best) best = n;
+        total += n;
+        for (uint32_t i = 0; i < n; i++) seen[tr[i].bed][tr[i].src]++;
+    }
+    CHECK(best == 48);                                  /* all in the same step, none dropped */
+    CHECK(total == 48 && steps_with_any == 1);
+    int each_once = 1;
+    for (int b = 1; b <= VG_MAX_BEDS; b++)
+        for (int s = 0; s < VG_SRC_COUNT; s++)
+            if (s != VG_SRC_SENSOR && s != VG_SRC_OFFLINE && seen[b][s] != 1) each_once = 0;
+    CHECK(each_once);
+}
+
 static void test_stamping_never_touches_an_overwritten_event(void)
 {
     vg_events_t ev;
@@ -527,6 +559,7 @@ int main(void)
     RUN(test_active_news2_alarm_is_replaced_by_a_technical_alarm_not_silence);
     RUN(test_transition_records_the_start_of_its_confirmation_delay);
     RUN(test_stamping_never_touches_an_overwritten_event);
+    RUN(test_one_cycle_can_report_every_bed_and_source);
     RUN(test_offline_bed);
     RUN(test_news2_raises_alarm_even_when_each_value_is_inside_limits);
     RUN(test_audio_pause_never_hides_the_alarm);

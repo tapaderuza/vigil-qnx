@@ -48,8 +48,8 @@ static void emit_frame(void)
 
 static void step(uint64_t now_ms)
 {
-    vg_transition_t tr[64];
-    uint32_t n = vg_engine_step(&g_engine, &g_beds, now_ms, &g_pic, tr, 64);
+    vg_transition_t tr[VG_MAX_TRANSITIONS];
+    uint32_t n = vg_engine_step(&g_engine, &g_beds, now_ms, &g_pic, tr, VG_MAX_TRANSITIONS);
     if (n > 0) vg_events_push(&g_events, now_ms, tr, n, &g_pic);
     for (uint32_t i = 0; i < n; i++) {
         printf("T+%07.1fs bed %u %-7s %-6s -> %-6s", now_ms / 1000.0, tr[i].bed, vg_src_name(tr[i].src),

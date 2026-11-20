@@ -127,6 +127,10 @@ typedef struct {
  */
 typedef struct { uint8_t bed, src, from, to; uint64_t since_ms; } vg_transition_t;
 
+/* Every bed and source can change level in the same cycle, so this is the largest number one vg_engine_step() can
+ * report. Callers size their buffer with it; a smaller one silently drops the excess transitions. */
+#define VG_MAX_TRANSITIONS (VG_MAX_BEDS * VG_SRC_COUNT)
+
 uint32_t vg_engine_step(vg_engine_t *e, const vg_beds_t *beds, uint64_t now_ms, vg_picture_t *pic,
                         vg_transition_t *trans, uint32_t max_trans);
 
