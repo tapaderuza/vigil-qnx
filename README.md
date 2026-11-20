@@ -61,7 +61,7 @@ Category: *Robotics & Medical*.
 
 ```bash
 sudo bash scripts/setup-wsl.sh     # Ubuntu 24.04 / WSL2: gcc, QEMU, pytest
-make test                           # 141 C checks + 29 pytest tests + 11 dashboard tests
+make test                           # 145 C checks + 32 pytest tests + 11 dashboard tests
 source ~/qnx800/qnxsdp-env.sh       # QNX SDP 8.0 (free, QNX Everywhere)
 make qnx                            # qcc -Vgcc_ntox86_64 ; QNX_ARCH=aarch64le for the Pi
 bash scripts/qnx-demo.sh ward       # boots QNX in QEMU, runs the tests ON QNX, streams a ward
@@ -81,7 +81,7 @@ Feed it with `python3 sim/vigil_sim.py send ward --host <vm-ip> --speed 20`.
 
 ## Verified on QNX 8.0
 
-See `docs/QNX_RUN.md`: built with `qcc` (`-Werror`), all 141 core checks executed on QNX, the `ward`
+See `docs/QNX_RUN.md`: built with `qcc` (`-Werror`), all 145 core checks executed on QNX, the `ward`
 scenario streamed over UDP, a flood with corrupt frames, live configuration through the resource manager.
 Running the host tests on the target also exposed a real platform difference: `strtod("36.8")` on
 QNX 8.0 is one ulp above the compiler's literal. Vigil normalises vital signs to one decimal, so

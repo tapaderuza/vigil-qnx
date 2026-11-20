@@ -44,6 +44,23 @@ in the same second (bed 3, decided in one cycle) and a bed that goes silent (bed
 transitions are fixed because noise is off. Transitions after the sender stops (all beds going stale) are set
 aside and counted.
 
+## Integrity case: eight beds, 48 transitions in one cycle
+
+Scenario `burst8`: eight beds cross HR, SpO2, RR, SBP and TEMP limits together and NEWS2 follows, so 8 beds x 6
+sources = 48 transitions are decided in a single engine cycle (then 40 on recovery and 8 NEWS2 releases later: 96 in
+all). `VG_MAX_TRANSITIONS` (beds x sources) sizes the buffer that `vigild` and `vg-replay` pass to `vg_engine_step`;
+the public version used 32 and 64, and the engine drops what does not fit. The unit test
+`test_one_cycle_can_report_every_bed_and_source` uses that same constant and fails if it is below 48.
+
+```bash
+SCENARIO=burst8 SCEN_SECONDS=70 WATCH_IDLE=40 UDP_PORT=10110 bash scripts/qnx-delivery.sh
+```
+
+The report compares three lists by identity (bed, source, previous and new state): the expected one from `vg-replay`,
+the daemon's own history (`/dev/vigil/events`) and what `vigil-watch` fetched. It counts events, not pulses (one pulse
+can announce several), lists missing and duplicated events, and sets aside what happens after the sender stops.
+Whether UDP puts all 48 in one cycle is measured, not assumed: the report prints the events per cycle.
+
 ## Run it
 
 On the host (no QNX needed):
@@ -67,7 +84,8 @@ It builds, deploys, runs the trial idle and then with `vigil-load` (two SCHED_FI
 
 * Host: instrumentation, report tool and their tests pass (`make test`).
 * QNX 8.0 under QEMU (x86_64, KVM, 2 vCPUs, user-mode networking): the trial ran on 2026-11-19; every expected
-  transition was received, in order, idle and loaded, none lost.
+  transition was received, in order, idle and loaded, none lost (15 of 15). `burst8`: 96 of 96, 48 of them decided in
+  one engine cycle, no duplicates, history and `vigil-watch` agree with the expected list.
 * **Numbers are not published.** QNX's non-commercial licence (section 4.6(i)) requires written approval to
   publish performance results; the organisers' answer in the forum thread is still pending. Until it arrives,
   public materials describe the method and say a run passed or failed, not how fast. A run describes only that

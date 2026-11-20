@@ -61,8 +61,8 @@ kernel pulses.
 ### How we built it
 
 The decision logic (frame decoding, NEWS2, the alarm engine) is portable C11 with no allocation and no QNX
-dependency, so the same sources run in 141 unit checks on a PC and on QNX. A simulator generates synthetic
-patients (a gradual decline, an acute desaturation, a probe fault, a silent bed, a busy ward) and 29 regression
+dependency, so the same sources run in 145 unit checks on a PC and on QNX. A simulator generates synthetic
+patients (a gradual decline, an acute desaturation, a probe fault, a silent bed, a busy ward) and 32 regression
 tests, plus 11 tests for the dashboard's freshness logic assert what a clinician would expect. The QNX layer is a thin set of threads around that core.
 
 ### Challenges and what running on the target taught us
