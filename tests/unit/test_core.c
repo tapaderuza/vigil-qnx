@@ -398,6 +398,51 @@ static void test_one_cycle_can_report_every_bed_and_source(void)
     CHECK(each_once);
 }
 
+/* Eight beds hold six alarms each, then every sensor goes quiet together. Once the values are older than sensor_ms the
+ * engine closes the six alarms of each bed (48 closures) and raises each bed's sensor warning (8) in the same cycle:
+ * 56 transitions, again with the buffer the daemon uses. */
+static void test_one_cycle_can_close_48_alarms_and_raise_8_sensor_warnings(void)
+{
+    CHECK(VG_MAX_TRANSITIONS == VG_MAX_BEDS * VG_SRC_COUNT && VG_MAX_TRANSITIONS >= 56);
+    setup();
+    vg_transition_t tr[VG_MAX_TRANSITIONS];
+    for (uint64_t t = 0; t <= 12000; t += 100) {
+        if (t % 1000 == 0)
+            for (int b = 1; b <= VG_MAX_BEDS; b++) {
+                char f[64];
+                snprintf(f, sizeof f, "%d,150,84,32,80,39.5,A,0", b);
+                feed(f, t);
+            }
+        vg_engine_step(&g_eng, &g_beds, t, &g_pic, tr, VG_MAX_TRANSITIONS);
+    }
+    CHECK(g_pic.n_high == 8);                           /* six alarms are active on each bed */
+    uint32_t steps_with_any = 0, n = 0;
+    uint64_t at = 0;
+    vg_transition_t got[VG_MAX_TRANSITIONS];
+    for (uint64_t t = 12100; t <= 18000; t += 100) {    /* no more frames: the last one was at 12 000 */
+        uint32_t k = vg_engine_step(&g_eng, &g_beds, t, &g_pic, tr, VG_MAX_TRANSITIONS);
+        if (k) {
+            steps_with_any++;
+            n = k;
+            at = t;
+            memcpy(got, tr, sizeof(got));
+        }
+    }
+    CHECK(steps_with_any == 1 && n == 56 && at == 17100);  /* the first cycle with age > sensor_ms (5 s) */
+    int closures[VG_MAX_BEDS + 1], sensors[VG_MAX_BEDS + 1], other = 0;
+    memset(closures, 0, sizeof closures);
+    memset(sensors, 0, sizeof sensors);
+    for (uint32_t i = 0; i < n; i++) {
+        if (got[i].src == VG_SRC_SENSOR && got[i].from == VG_LVL_NONE && got[i].to == VG_LVL_MEDIUM) sensors[got[i].bed]++;
+        else if (got[i].src != VG_SRC_SENSOR && got[i].src != VG_SRC_OFFLINE && got[i].to == VG_LVL_NONE && got[i].from != VG_LVL_NONE)
+            closures[got[i].bed]++;
+        else other++;
+    }
+    int ok = other == 0;
+    for (int b = 1; b <= VG_MAX_BEDS; b++) ok = ok && closures[b] == 6 && sensors[b] == 1;
+    CHECK(ok);
+}
+
 static void test_stamping_never_touches_an_overwritten_event(void)
 {
     vg_events_t ev;
@@ -560,6 +605,7 @@ int main(void)
     RUN(test_transition_records_the_start_of_its_confirmation_delay);
     RUN(test_stamping_never_touches_an_overwritten_event);
     RUN(test_one_cycle_can_report_every_bed_and_source);
+    RUN(test_one_cycle_can_close_48_alarms_and_raise_8_sensor_warnings);
     RUN(test_offline_bed);
     RUN(test_news2_raises_alarm_even_when_each_value_is_inside_limits);
     RUN(test_audio_pause_never_hides_the_alarm);

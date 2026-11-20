@@ -193,8 +193,25 @@ def sc_burst8() -> Scenario:
     return Scenario("burst8", "Integrity: eight beds, six changes each, decided in one engine cycle", beds, 70.0)
 
 
+def sc_burst8close() -> Scenario:
+    """Integrity case 2: eight beds raise six alarms each, then every sensor goes quiet together. After sensor_s the
+    engine closes the 6 alarms of each bed (48 closures) and raises the sensor warning of each (8) in the SAME cycle:
+    56 transitions. Run vg-replay with -t 15 to see the stale and offline consequences as well."""
+    quiet = {"hr": 0.0, "spo2": 0.0, "rr": 0.0, "sbp": 0.0, "temp": 0.0}
+    beds = []
+    for i in range(1, 9):
+        p = stable(i, f"Bed {i}")
+        p.noise = dict(quiet)
+        p.traj = {"hr": [(0, 72), (7, 72), (7.01, 150), (60, 150)], "spo2": [(0, 97), (7, 97), (7.01, 84), (60, 84)],
+                  "rr": [(0, 15), (7, 15), (7.01, 32), (60, 32)], "sbp": [(0, 124), (7, 124), (7.01, 80), (60, 80)],
+                  "temp": [(0, 36.8), (7, 36.8), (7.01, 39.5), (60, 39.5)]}
+        p.silent = [(30, 10000)]
+        beds.append(p)
+    return Scenario("burst8close", "Integrity: 48 alarm closures and 8 sensor warnings in one engine cycle", beds, 31.0)
+
+
 SCENARIOS: Dict[str, Callable[[], Scenario]] = {
-    f.__name__[3:]: f for f in (sc_stable, sc_deterioration, sc_desat, sc_probe_off, sc_offline, sc_ward, sc_delivery, sc_burst8)
+    f.__name__[3:]: f for f in (sc_stable, sc_deterioration, sc_desat, sc_probe_off, sc_offline, sc_ward, sc_delivery, sc_burst8, sc_burst8close)
 }
 
 

@@ -41,7 +41,7 @@ UDP_PORT=10110 bash scripts/qnx-delivery.sh     # 1:45; writes out/delivery/<sta
 
 1. **Bed 01 on the dashboard (QNX).** NEWS2 alarms 3 min 26 s (simulated time) before the first single-value alarm in
    the `deterioration` scenario. Synthetic patient.
-2. **Connection lost (HOST).** The panel's own banner, values marked historic, and the time of the last valid update.
+2. **Connection lost (QNX 8.0).** The panel's own banner, values marked historic, and the time of the last valid update.
 3. **Transition received by `vigil-watch` (QNX 8.0).** A secure event wakes the consumer; one line per transition.
 4. **Delivery trial report (QNX 8.0 under QEMU).** Expected against received transitions, none lost. A run describes
    only that run. No timing figures are shown pending the organisers' written answer on the licence.

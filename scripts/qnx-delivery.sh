@@ -24,6 +24,7 @@ source "$QNX_SDP/qnxsdp-env.sh" > /dev/null
 
 SCENARIO="${SCENARIO:-delivery}"      # delivery (default, 15 transitions) or burst8 (96 transitions, 48 in one cycle)
 SCEN_SECONDS="${SCEN_SECONDS:-75}"
+EXPECT_TAIL="${EXPECT_TAIL:-0}"        # seconds the host replay keeps running after the last frame (burst8close: 15, to include the expiries)
 WATCH_IDLE="${WATCH_IDLE:-25}"       # seconds without an event before vigil-watch exits (burst8 needs 40)
 STAMP="$(date +%Y%m%d-%H%M%S)-$SCENARIO"
 OUT="out/delivery/$STAMP"
@@ -39,7 +40,7 @@ make host > /dev/null
 make qnx QNX_ARCH=x86_64 > /dev/null
 
 echo "== expected transitions: the same frames through the portable core on the host"
-python3 sim/vigil_sim.py generate "$SCENARIO" | out/host/vg-replay > "$OUT/expected.txt" 2> /dev/null
+python3 sim/vigil_sim.py generate "$SCENARIO" | out/host/vg-replay -t "${EXPECT_TAIL:-0}" > "$OUT/expected.txt" 2> /dev/null
 echo "   $(grep -c '^T+' "$OUT/expected.txt") transitions expected"
 
 if ! (echo > /dev/tcp/127.0.0.1/"$SSH_PORT") 2>/dev/null; then

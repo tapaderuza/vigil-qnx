@@ -181,3 +181,13 @@ def test_burst8_decides_48_transitions_in_one_engine_cycle():
     first = [x for x in trs if x.t == trs[0].t]
     assert len(first) == 48 and {x.bed for x in first} == set(range(1, 9)) and len({(x.bed, x.src) for x in first}) == 48
     assert len(trs) == 96
+
+
+def test_burst8close_closes_48_alarms_and_raises_8_sensor_warnings_in_one_cycle():
+    trs, _ = replay("burst8close", "-t", "15")
+    first = [x for x in trs if x.t == trs[0].t]
+    assert len(first) == 48                                              # raised together
+    stale = [x for x in trs if x.t == trs[48].t]
+    assert len(stale) == 56                                              # the same cycle
+    assert sum(x.src == "SENSOR" and x.to == "MEDIUM" for x in stale) == 8
+    assert sum(x.src not in ("SENSOR", "OFFLINE") and x.to == "NONE" for x in stale) == 48
