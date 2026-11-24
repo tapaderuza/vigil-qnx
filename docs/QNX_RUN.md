@@ -14,6 +14,8 @@ Guest: `QNX noname 8.0.0 2026/10/30-09:10:05EDT x86pc x86_64`.
 | flood: 93,674 datagrams with 30 percent corrupt frames | 21,524 corrupt frames rejected, all beds still tracked |
 | `vigil-ctl pause` | audible state paused and reported, the visual alarm stays (Vigil produces no sound) |
 | `echo "hr_high_med 110" > /dev/vigil/config` | applied; `hr_high_med 999` is rejected with exit 1 |
+| least privilege (2026-11-24): `vigild` with the `procmgr_ability` lockdown | log: "spawn, fork, setuid, new path names, physical memory, port I/O, interrupts, clock, reboot and cross-process debug denied and locked (spawn test: Operation not permitted)"; `/dev/vigil` still served, config write still applied, engine cycles with 0 deadline overruns |
+| delivery trial with the lockdown on (2026-11-24, `scripts/qnx-delivery.sh`) | 15 of 15 expected transitions received by `vigil-watch`, in order, none missing, no duplicates, the ring overwrote none |
 
 The same scenarios give the same alarm transitions on the host (`sim/test_sim.py`) and on QNX.
 No latency figures are published here: the non-commercial licence restricts publishing performance results (see `docs/DELIVERY.md`).
