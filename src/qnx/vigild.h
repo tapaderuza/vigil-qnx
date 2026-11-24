@@ -34,6 +34,7 @@ typedef struct {
     int      prio_engine, prio_resmgr, prio_ingest, prio_http;
     char     dev_prefix[48];  /* "/dev/vigil" */
     int      foreground;      /* also log to stderr */
+    int      no_lockdown;     /* -L: keep all abilities (debugging only) */
 } vgd_options_t;
 
 extern vgd_options_t g_opt;
@@ -63,6 +64,11 @@ uint64_t vgd_now_ns(void);
 
 /* Start a SCHED_FIFO thread. Falls back to inherited priority (with a warning) if refused. */
 int vgd_spawn(pthread_t *t, int prio, const char *name, void *(*fn)(void *));
+
+/* Least privilege (privs.c): each thread calls vgd_ready() once it holds its resources;
+ * main then calls vgd_lockdown() to deny and lock every ability the running engine does not need. */
+void vgd_ready(void);
+int vgd_lockdown(int expected_ready);
 
 void *vgd_ingest_thread(void *arg);
 void *vgd_resmgr_thread(void *arg);

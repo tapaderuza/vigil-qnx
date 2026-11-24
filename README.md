@@ -37,6 +37,7 @@ Category: *Robotics & Medical*.
 | **Secure events** (`MsgRegisterEvent`, `MsgDeliverEvent`) | `tools/vigil_watch.c` | alarm changes pushed to a nurse-station client with no polling; only the daemon can fire the event |
 | **Resource manager** (`resmgr_attach`, `iofunc_*`) | `src/qnx/resmgr.c` | `cat /dev/vigil/alarms`; `echo "hr_high_med 110" > /dev/vigil/config` |
 | Priority-inheriting mutex, slog2, mlockall | `vigild.c` | bounded readers, an audit trail of every alarm, no page faults |
+| **Least privilege** with process-manager abilities (`procmgr_ability`, deny + lock) | `src/qnx/privs.c` | vigild needs root only to set up. Once its threads hold their channel, `/dev/vigil` paths and sockets, it denies and locks, for root and non-root alike, spawn, fork, setuid, new path names, physical memory, port I/O, interrupts, setting the clock, reboot and cross-process debug. Locked abilities cannot come back, so a compromised monitor cannot start programs or touch hardware. It proves it at start-up: a spawn attempt must fail with EPERM (logged to slog2). `-L` keeps the abilities for debugging |
 
 ```
  UDP vital-sign frames            (priority 20)                 (priority 40)

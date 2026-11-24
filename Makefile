@@ -9,7 +9,7 @@
 
 CORE_SRC  := src/core/nmea.c src/core/vitals.c src/core/alarms.c
 CORE_HDR  := $(wildcard src/core/*.h)
-QNX_SRC   := src/qnx/vigild.c src/qnx/resmgr.c src/qnx/ipc.c src/qnx/http.c
+QNX_SRC   := src/qnx/vigild.c src/qnx/resmgr.c src/qnx/ipc.c src/qnx/http.c src/qnx/privs.c
 QNX_HDR   := $(wildcard src/qnx/*.h) src/qnx/web_index.h
 
 WARN      := -Wall -Wextra -Wshadow -Wformat=2 -Wno-format-nonliteral

@@ -461,7 +461,7 @@ int main(int argc, char **argv)
     snprintf(g_opt.dev_prefix, sizeof(g_opt.dev_prefix), "/dev/vigil");
 
     int opt;
-    while ((opt = getopt(argc, argv, "u:g:w:b:p:E:R:I:H:d:fh")) != -1) {
+    while ((opt = getopt(argc, argv, "u:g:w:b:p:E:R:I:H:d:fLh")) != -1) {
         switch (opt) {
         case 'u': g_opt.udp_port = atoi(optarg); break;
         case 'g': snprintf(g_opt.mcast_group, sizeof(g_opt.mcast_group), "%s", optarg); break;
@@ -474,6 +474,7 @@ int main(int argc, char **argv)
         case 'H': g_opt.prio_http = atoi(optarg); break;
         case 'd': snprintf(g_opt.dev_prefix, sizeof(g_opt.dev_prefix), "%s", optarg); break;
         case 'f': g_opt.foreground = 1; break;
+        case 'L': g_opt.no_lockdown = 1; break;
         default: usage(argv[0]); return opt == 'h' ? 0 : 2;
         }
     }
@@ -559,6 +560,10 @@ int main(int argc, char **argv)
 
     vgd_log(SLOG2_NOTICE, "started: udp %d, http %d, period %u ms, engine priority %d, devices %s", g_opt.udp_port,
             g_opt.http_port, g_opt.period_ms, g_opt.prio_engine, g_opt.dev_prefix);
+    /* Everything the engine needs is held now: give up every other ability for good (-L keeps them, for debugging). */
+    if (!g_opt.no_lockdown) {
+        vgd_lockdown(2 + (g_opt.http_port > 0 ? 1 : 0));
+    }
     engine_loop(attach, period_ns, t_start_ns);
 
     timer_delete(tid);

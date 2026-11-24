@@ -85,6 +85,7 @@ void *vgd_ingest_thread(void *arg)
         return NULL;
     }
     vgd_log(SLOG2_INFO, "ingest: listening on udp %d", g_opt.udp_port);
+    vgd_ready();
 
     char buf[2048];
     for (;;) {

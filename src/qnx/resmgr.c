@@ -189,6 +189,7 @@ void *vgd_resmgr_thread(void *arg)
     }
     vgd_log(SLOG2_INFO, "resmgr: serving %s/{beds,alarms,stats,events,config}",
             g_opt.dev_prefix);
+    vgd_ready();
 
     dispatch_context_t *ctp = dispatch_context_alloc(dpp);
     if (ctp == NULL) {

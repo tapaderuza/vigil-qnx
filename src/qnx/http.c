@@ -152,6 +152,7 @@ void *vgd_http_thread(void *arg)
         return NULL;
     }
     vgd_log(SLOG2_INFO, "http: dashboard on http://%s:%d/", g_opt.http_bind, g_opt.http_port);
+    vgd_ready();
 
     for (;;) {
         int fd = accept(ls, NULL, NULL);
