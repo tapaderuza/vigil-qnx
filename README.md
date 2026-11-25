@@ -48,6 +48,10 @@ Category: *Robotics & Medical*.
  http://host:8080  bedside dashboard + /api/*   ◄── http thread (10) ──────────────┘   vigil-ctl, vigil-watch
 ```
 
+## No AI in the alarm path, on purpose
+
+Alarms that wake a nurse must be explainable and repeatable, so Vigil decides with published rules (IEC 60601-1-8 alarm concepts and the NEWS2 score), never with a model. Every alarm traces back to the value, the limit and the delay that caused it, and the same input always gives the same alarms.
+
 ## Repository map
 
 * `src/core/`: portable C11, no allocation, no QNX dependency (frame decoding, NEWS2, alarm engine,
